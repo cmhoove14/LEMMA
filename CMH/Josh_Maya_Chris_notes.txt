@@ -1,0 +1,119 @@
+COVID modeling meeting with Maya and Josh 5/5/20
+
+Started in early March to help with SFDPH projections and such, so Josh wrote some basic code to DPH to help out, but now pulled into 6 month project to help out
+	- Self-proclaimed not math modelers, but increasingly important reliance on their projections, working with higher ups
+	- Directly with SF DPH on hospital use projections, progressed to status of the epidemic, now given local data, what can we say about the status of the epidemic, effect of shelter in place, risk going forward
+		- Essentially decision support at this point to generate quantitative estimates for local DPHs
+		- Interest in regional coordination
+			- Call last night with regional DPHs (9 of them)
+	- TEAM:
+		- San Francisco DPH and clinical context 
+		- Laura Balzer (Amherst)
+		- Elvin Geng using the model in Missouri
+			- Implementation Science at UW
+	- Some open source code, decision support role, funding to expand the support role
+	- Other potential piece is study starting at Berkeley about safe approaches for returning to campus
+		- Using data to navigate through the coming months
+		- Potentially pulling in data from some more advanced sources like Google API, etc.
+	- Adaptive surveillance
+		- How do we use data to figure out who to test, when, where how often?
+			- Stat part that Mark van der Laan is working on
+			- Bringing testing to communities for those that aren't seeking out testing
+	- Publications? Maybe, but haven't spent much time mapping those out
+		- Not a lot in the niche of intermediate level of complexity
+			- Many don't serve local decision making all that well
+			- Maybe write something up about models from an implementation science perspective
+				- What is the model as a tool, what is being used for?
+					- Identifying gaps in data collection?
+				- Just writing up modeling results
+					- Writing up applications of the tool
+What is the job? Day to day, etc.
+	1) Taking what we have and making it more useful
+		- Adding documentation, testing, making it professional
+		- Creating github site
+		- If people are using it, make it solid
+			- Make it reproducible
+	2) Increase functionality
+		- Add multiple populations, not homogenous mixing
+			- e.g data on populations experiencing homelessness
+		- Mission study
+			- If epidemic is being driven by people in particular zip codes, need to capture that
+		- Capturing heterogeneities to better inform decision making, make interventions more equitable, etc.
+	3) Bring in more data sources
+		- Testing, deaths, ICU
+	4) Public facing dashboard sort of thing
+		- Creating some sort of page people could go to, etc.
+		- DPHs open to guidance on what this would look like
+		- Lots of room to bring own ideas, etc.
+	* Some tasks, but lots of room to think creatively about problems and offer solutions in response
+		- Lots of thinking as well as executing
+	5) Shiny app? something to encourage wider use
+		- Aiming to be usable and accessible to folks who aren't programmers, experts
+	* Balancing user interface with new functionality a lot
+	
+Meeting with Josh 5/8/20
+	- Basic discrete time SEIR model with hospital state
+		- Different parameters input by the user (generally via an excel spreadsheet, but can be input directly from R)
+		- Sample from input range of parameters n times 
+			- 10000 parameter sets drawn from input parameters
+			- Next step asks which of these parameter sets is compatible with user input data
+				- User inputs data on lower and upper bound estimate of hospitalizations (for those with PUI upper bound =  Hosp*0.3PUI)
+			- Now SEIR model is run with different parameters and it's determined which parameter sets are accepted
+				- "Internal" tab in spreadsheet, user can edit, but probably not
+				- Search procedure tries different starting initial conditions (date and number of cases) until it finds something reasonable
+		- Posterior distributions generated from parameter sets that fit the data
+	- Coordinated dashboard where uniform data comes in from 9 counties and some automated process runs the model, updates projections, etc.
+	- How to communicate effects of different potential interventions
+	- Improvements to existing model and infrastructure
+	- Additional modeling efforts to build out more realistic models with more heterogenous populations
+		- How are we going to help most affected populations and general populations that are interacting with high risk populations
+		- Incorporating testing data
+			- Part of the plan, but also has to be part of the modeling
+	- Think about helping Santa Cruz people out with STAN and MCMC
+
+Meeting with Josh and Maya 5/15/20
+	-Line list data from Mission study available, Josh to send Data Dictionary
+	-Maya has money to maybe hire another person
+		-Keep in mind
+		-Josh got a few resumes via Karthik
+	-Josh's modeling list:
+		-two population model: vulnerable populations model on github
+			-Arrays all have another dimension
+			-Beta matrix that determines cross-infection
+			-Maybe compare to network model?
+			-Initial thought was that maybe we need a model for a specific sub-population
+	-Managing incoming data streams
+		-Currently pulling public data, but Maya working on getting better data streams
+	-General observed data fitting
+		-Fitting to ICU, testing/cases, deaths, etc.
+		-Needed for comparison to UCSC model
+			-Does extra data improve fit, especially for e.g. SC where hospitalizations data is very low
+	-Add incoming infected people (e.g. case importations)
+		-Does this become major source of infection in the future?
+	-Superlearner ideas? Forecasting/machine learning for prediction. Probably separate thing others are working on
+		-Ivana maybe working on this with Alan?
+			-Connection via Berkeley work/model
+	-Mobility data?
+		-Descartes lab mobility data by county and day 
+		-Super correlated with Re
+	-Hospital model?
+		-Becomes higher priority if we're afraid of hospital overrun, not as important right now
+	-Regional dashboard supposed to be happening at some point
+	-EpiEstim to estimate R?
+	-Natural experiments type thing to look at states that are opening up and their results and what that means for Bay Area/ SFDPH
+	-Comparing COVID to pandemic flu; second wave?
+		-First peak then 2-4 month lag and then second peak?
+	-Second wave transmission dynamics? Lower priority, but maybe interesting longterm?
+-General idea of priorities:
+	-Agent based/Network model main priority short term
+	-Execute low-hanging fruit type things: LEMMA improvements, prior distributions, input data, etc.
+		-Translating into STAN
+-One thing about LEMMA
+	-Rate to hospital or time to hospital constant_rate_to_hospital
+		-Legacy thing from earlier models, would be good to get rid of it
+		-CHIME model (UPenn model) that had 
+			-SIR process and then separate deterministic process that took I compartment and sent people to hospital after 10 days
+			-Harder to fit St. Louis and Alameda if it's taken out, but not sure why
+			-uhr (use.hosp.rate) =TRUE or FALSE
+	-Idea was that LEMMA was combining a couple models
+	

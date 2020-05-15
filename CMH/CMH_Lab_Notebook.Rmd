@@ -70,13 +70,27 @@ Didn't make it to STAN on the 11th, so want to try and get an idea of some of th
 Need to explicitly define distributions of priors in STAN, which can mostly be done from the same framework already built into LEMMA inputs.
 
 
-# Potential improvements (running list)    
+# Potential improvements/ideas (running list)    
 
 ## Network models to examine sub-epidemics (like Mission study), implications for effectiveness of SiP, opening back up  
 Intro paper on network models [here](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5931789/pdf/nihms961617.pdf) with corresponding R package and [website with tutorials](http://www.epimodel.org/)  
 
+#### Questions  
+* What are the characteristics of a network that gives rise to the findings of the Mission study?  
+* What are the implications of such a network for efficacy/limitations of SiP intervention? What are the implications for lifting SiP? i.e. how does the network change once SiP is lifted and how does transmission then propogate through this post-SiP network?  
+* How can test-trace-isolate be used to limit transmission through such a network?  
+
+#### Concepts  
+* **Degree** or **connectivity** ($k$) - number of neighbors an individual has; **degree distribution** ($p_k$) population level characteristic of connectivity  
+* **Size** of the network described by **distance** between two nodes - the length of the shortest path between them in the network; **diameter** of the network is the largest **distance** in the network  
+* **Mixing matrix** describes how individuals of type $i$ within the network are connected to individuals of type $j$ where "type" can refer to any characteristic that differs between individuals. **Assortative mixing** describes a network pattern in which individuals are more likely to interact with like individuals  
+* **local clustering** ($\phi$) - how many pairs are shared between pairs of individuals in the network, e.g. given two pairs, how many of the networks between the two pairs will look like triangles in which A relates to B, B relates to C, AND A also relates to C.  
+* **Betweenness/Centrality** - Importance of particular individuals within the network; number of paths between $i$ and $j$ that pass through a particular node  
+
 ## Continuous time, stochastic model versions  
 I've got a continuous time stochastic model built with the `adaptivetau` package that's got a slightly different structure that I could work on building out a bit more/make more user friendly with similar input/output functionality. Would having three models all running projections help or make things more confusing? Maybe have this going on behind the scenes and convey where there's more or less agreement between the models to DPHs?  
+
+## Quantifying impact: how many cases/hospitalizations/deaths avoided due to SiP?  
 
 ## Erlang distributed latent period, hospitalization length  
 Maybe a bit more of an academic exercise, but compartmental models make an implicit assumption that wait times between model states are exponentially distributed, which is rarely the case. Implementing "box cars", we can relax this assumption to make wait times Erlang (special case of a gamma distribution in which the shape parameter is a positive integer) distributed. Would be good for both $E$ and $H$ states given we have data on the distributions of latent period and hospitalization times we could fit to  
