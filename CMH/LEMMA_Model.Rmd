@@ -86,3 +86,7 @@ $$\mathbf{T}=
 
 
 $$\mathcal{R}_0=\beta\sigma\frac{(1-\alpha)\gamma_H+\alpha\gamma_R}{\gamma_R\gamma_H}$$
+
+This means that beta in the model should be estimated from input model parameters as: 
+
+$$\beta=\frac{\mathcal{R}_0\gamma_R\gamma_H}{\sigma\big((1-\alpha)\gamma_H+\alpha\gamma_R\big)}$$

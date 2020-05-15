@@ -15,7 +15,8 @@ devtools::load_all("../")
 
 # TODOs  
 5/11/20 Clarify source of iterations/updating with Josh  
-5/11/20 Get $R_0$ equation as function of model parameters from NextGen matrix
+5/11/20 Get $R_0$ equation as function of model parameters from NextGen matrix  
+  * Completed 5/11/20; see `LEMMA_model`  
 
 # 5/11/2020  
 Goals:  
@@ -53,34 +54,38 @@ LEMMA::CredibilityIntervalFromExcel("example.xlsx")
 
 Works for the most part except for a fairly obscure ggplot error  
 
+# 5/15/2020  
+Didn't make it to STAN on the 11th, so want to try and get an idea of some of the advantages and disadvantages STAN has compared to other approaches and maybe get around to coding up a version of the model in STAN
+
+## STAN Pros:  
+* Hamiltonian MCMC in STAN is quite fast and would generate more posterior samples  
+* Could incorporate priors to constrain some of the parameters like hospitalization rate  
+* Could place a prior on $t_0$ and fit epidemic start time more explicitly  
+
+## STAN Cons:  
+* Not sure how to implement the same type of model fit in STAN that incorporates the min and max guess (i.e. confirmed hospitalizations and hospitalizations + 30% suspected cases). Could put a distribution on it, but could end up being a bit wonky  
+
 ## Implementing in STAN  
 ### Priors  
 Need to explicitly define distributions of priors in STAN, which can mostly be done from the same framework already built into LEMMA inputs.
-```{r stan_priors}
 
-```
-
-```{r stan_model}
-# Some Rstan setup options  
-rstan_options(auto_write = TRUE)
-options(mc.cores = parallel::detectCores())
-
-# Rstan model  
-cat(
-  '
-  functions{}
-  '
-)
-```
 
 # Potential improvements (running list)    
+
+## Network models to examine sub-epidemics (like Mission study), implications for effectiveness of SiP, opening back up  
+Intro paper on network models [here](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5931789/pdf/nihms961617.pdf) with corresponding R package and [website with tutorials](http://www.epimodel.org/)  
+
 ## Continuous time, stochastic model versions  
+I've got a continuous time stochastic model built with the `adaptivetau` package that's got a slightly different structure that I could work on building out a bit more/make more user friendly with similar input/output functionality. Would having three models all running projections help or make things more confusing? Maybe have this going on behind the scenes and convey where there's more or less agreement between the models to DPHs?  
+
 ## Erlang distributed latent period, hospitalization length  
-### Make some priors endogenous (e.g. non-adjustable), focus users on things most likely to vary by region/area/population  
+Maybe a bit more of an academic exercise, but compartmental models make an implicit assumption that wait times between model states are exponentially distributed, which is rarely the case. Implementing "box cars", we can relax this assumption to make wait times Erlang (special case of a gamma distribution in which the shape parameter is a positive integer) distributed. Would be good for both $E$ and $H$ states given we have data on the distributions of latent period and hospitalization times we could fit to  
+
+### Make some priors endogenous (e.g. non-adjustable), focus users on things most likely to vary by region/area/population:   
 
 * Population Size  
 * Start date of projection  
 * End date of projection  
 * Percent infected who are hospitalized  
 * Average hospital length of stay  
-* Timing and effectiveness ($\mathcal{R_e}$) of interventions  
+* Timing and effectiveness ($\mathcal{R}_e$) of interventions  
