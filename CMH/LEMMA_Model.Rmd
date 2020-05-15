@@ -1,0 +1,88 @@
+---
+title: "LEMMA Model Descriptive"
+author: "Chris Hoover"
+date: "5/11/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, cache = TRUE)
+
+```
+
+## Equations  
+\begin{align*}
+\dot{S}&=-\beta S(I_R+I_H)/N \\
+\dot{E}&=\beta S(I_R+I_H)/N-\sigma E \\
+\dot{I_R}&=\sigma(1-\alpha) E-\gamma_R I_R \\
+\dot{I_H}&=\sigma\alpha E-\gamma_H I_H \\
+\dot{H}&=\gamma_H I_H-\psi H \\
+\dot{DC}&=\psi H \\
+\dot{R}&=\gamma_R I_R \\
+\end{align*}
+
+```{r par_table, echo = FALSE, include = FALSE, dev="tikz"}
+tab1 <- data.frame(des = c("Susceptibles",
+                           "Exposed, pre-infectious",
+                           "Infectious, will be hospitalized",
+                           "Infectious, will no be hospitalized",
+                           "Hospitalized",
+                           "Discharged from hospital (either deceased or recovered)",
+                           "Recovered without being hospitalized",
+                           "Total population size",
+                           "Transmission rate",
+                           "1/latent period",
+                           "Proportion infected that will be hospitalized",
+                           "1/time from infectiousness to hospitalization",
+                           "1/duration of infectiousness for non-hospital-bound cases",
+                           "1/time from hospitalization to discharge"
+))
+
+rownames(tab1) <- c("$S$","$E$","$I_H$", "$I_R$","$H$","$DC$", "$R$", "$N$",
+                    "$\\beta$","$\\sigma$", "$\\alpha$","$\\gamma_H$", "$\\gamma_R$", "$\\psi$")
+
+knitr::kable(tab1, row.names = TRUE, 
+             #col.names = c("Value", "Definition"), 
+             format = "latex", escape = FALSE, 
+             caption = "Parameter values and descriptions used in the model")
+```
+
+
+## $\mathcal{R}_0$ formulation  
+For complex models such as this, best to use the next generation matrix method (see [here](https://doi.org/10.1098/rsif.2009.0386)) to estimate the basic reproduction number as a function of model equations. Briefly, the next generation matrix method constructs transmission, $\mathbf{T}$, and transition, $\mathbf{\Sigma}$, matrices from the linearized infection subsystem of a system of differential equations and $\mathcal{R}_0$ is the max eigenvalue of $-\mathbf{T\Sigma}^{-1}$. User can select whether hospital population, $H$, is infectious(and therefore part of the infection subsystem) or not, so will construct estimates for case where $H$ is and is not infectious.
+
+### Hospital population, $H$, is infectious  
+$$\mathbf{T}=
+\begin{bmatrix}
+0 & \beta & \beta & \beta \\
+0 & 0 & 0 & 0 \\
+0 & 0 & 0 & 0 \\
+0 & 0 & 0 & 0 \\
+\end{bmatrix}
+\mathbf{\Sigma}=
+\begin{bmatrix}
+-\sigma & 0 & 0 & 0 \\
+\sigma(1-\alpha) & \gamma_R & 0 & 0 \\
+\sigma\alpha & 0 & -\gamma_H & 0 \\
+0 & 0 & \gamma_H & -\psi \\
+\end{bmatrix}$$
+
+
+$$\mathcal{R}_0=\beta\sigma\frac{(1-\alpha)\gamma_H+\alpha\gamma_R}{\gamma_R\gamma_H\psi}$$
+
+### Hospital population, $H$, is NOT infectious  
+$$\mathbf{T}=
+\begin{bmatrix}
+0 & \beta & \beta \\
+0 & 0 & 0  \\
+0 & 0 & 0  \\
+\end{bmatrix}
+\mathbf{\Sigma}=
+\begin{bmatrix}
+-\sigma & 0 & 0  \\
+\sigma(1-\alpha) & \gamma_R & 0  \\
+\sigma\alpha & 0 & -\gamma_H  \\
+\end{bmatrix}$$
+
+
+$$\mathcal{R}_0=\beta\sigma\frac{(1-\alpha)\gamma_H+\alpha\gamma_R}{\gamma_R\gamma_H}$$

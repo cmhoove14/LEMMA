@@ -1,0 +1,15 @@
+base
+RevoUtilsMath
+RevoUtils
+StanHeaders
+ggplot2
+rstan
+tidyverse
+tibble
+tidyr
+readr
+purrr
+dplyr
+stringr
+forcats
+LEMMA

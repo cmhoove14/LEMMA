@@ -1,0 +1,55 @@
+UCSC LEMMA Meeting 5/14/2020
+-Mikala SC County communicable disease epidemiologist
+	-Disease modeling syndromic surveillance
+	-New reopening metrics from Newsom
+	
+-Paul - Ocean Sciences and statistics; dynamical modeling of ocean sciences
+	-SEIR with some uncertainty built in; coded in STAN
+	
+-Age structured data tried to incorporate but model didn't work great; not enough degrees of freedom
+	-One age group with everyone inside
+	-Hospitalizations quite low and ICU proportion quite high
+		-Going from I from model to I_observed (to fit data to)
+			-Doesn't vary through time, but does incorporate testing fraction
+			-Data on hospitalizations and ICU
+			-Data on mortality (maybe most trustworthy)
+				-Probably constrains the model the most
+		-Beta fit with spline and allowed to vary through time
+			-User can put in prescribed variations in beta to simulate projections in time to the future
+			-Allow data input via txt, csv, xlsx
+			-*Noncumulative data
+				-Using hospitalized census data
+			-Currently using normal distributions for most of the input parameters
+			-Initial distribution of when outbreak started
+			-Rhat: measure of how everything has converged
+	-Spits out estimates of beta through time, mortality through time, detection rate through time, etc.
+-Starting to get some seroprevalence data, e.g. from the Mission study
+	-2% PCR positive of 4000 people in the mission (initial results)
+		-Antibody results still pending
+	-Extension of models to consider different types of populations
+	-Another 6000 person seroprevalence survey starting in the East Bay
+-Started in decision support role with SFDPH and then expanded a lot
+	-Where are we going?
+		-Original use case was hospitalization projections
+		-Evolved into helping SFDPH
+		-Helping through scenarios to lift Shelter in PLace
+			-Mitigation strategies
+		-Understanding of different interventions and their potential effects 
+		-Monitoring strategies for when epidemic curves start going up
+			-Bringing in different types of data
+				-E.g. infections data -> time-varying reporting fractions
+			-Pushing availability to fit to multiple data sources
+		-Sub-populations dynamics; epidemics within specific populations
+			-Primary data collection in Berkeley of long. cohorts testing and risk factors
+				-How to integrate modeling work with this data
+				-Implications for modifying intervention strategies
+		-Contact tracing: how much is needed? How many tests?
+	-Is public data available yet?
+		-Hospitalizations data available on CDPH (CHHS) website
+			-Case data from Hopkins
+	-SC transitioning to reopening as a check in to make sure as things are lifted that things don't start bouncing back
+		-Updates to model, time dependent testing fractions
+		-Number of lives saved (e.g. by sheltering place; hospitalizations avoided)
+			-Measuring the impact
+	-Descartes labs mobility data
+		-Can we lift and have mobility and beta/Rt track less
