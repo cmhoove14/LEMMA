@@ -65,10 +65,8 @@ Didn't make it to STAN on the 11th, so want to try and get an idea of some of th
 ## STAN Cons:  
 * Not sure how to implement the same type of model fit in STAN that incorporates the min and max guess (i.e. confirmed hospitalizations and hospitalizations + 30% suspected cases). Could put a distribution on it, but could end up being a bit wonky  
 
-## Implementing in STAN  
-### Priors  
-Need to explicitly define distributions of priors in STAN, which can mostly be done from the same framework already built into LEMMA inputs.
-
+# 5/18/2020  
+Fixed some algebra slip-ups in the $\mathcal{R}_0$ calculation for the model in the `LEMMA_model` document  
 
 # Potential improvements/ideas (running list)    
 
