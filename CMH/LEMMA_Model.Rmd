@@ -62,13 +62,30 @@ $$\mathbf{T}=
 \mathbf{\Sigma}=
 \begin{bmatrix}
 -\sigma & 0 & 0 & 0 \\
-\sigma(1-\alpha) & \gamma_R & 0 & 0 \\
+\sigma(1-\alpha) & -\gamma_R & 0 & 0 \\
 \sigma\alpha & 0 & -\gamma_H & 0 \\
 0 & 0 & \gamma_H & -\psi \\
 \end{bmatrix}$$
 
+$$\mathbf{-\Sigma^{-1}}=
+\begin{bmatrix}
+1/\sigma & 0 & 0 & 0 \\
+(1-\alpha)/\gamma_R & 1/\gamma_R & 0 & 0 \\
+\alpha/\gamma_H & 0 & 1/\gamma_H & 0 \\
+\alpha/\psi & 0 & 1/\psi & 1/\psi \\
+\end{bmatrix}$$
 
-$$\mathcal{R}_0=\beta\sigma\frac{(1-\alpha)\gamma_H+\alpha\gamma_R}{\gamma_R\gamma_H\psi}$$
+$$\mathcal{R}_0=\frac{\beta(1-\alpha)}{\gamma_R}+\frac{\beta\alpha}{\gamma_H}+\frac{\beta\alpha}{\psi}$$
+
+Due to the two potential infection pathways (those who will recover on their own and those who will be hospitalized), can think of this as transmission driven by those that end up in the hospital, $\mathcal{R}_H=\beta\alpha(\gamma_H+\psi)/\gamma_H\psi$ and transmission driven by mild cases, $\mathcal{R}_R=\beta(1-\alpha)/\gamma_R$, so 
+
+$$\mathcal{R}_0=\mathcal{R}_R+\mathcal{R}_H$$
+
+$$\mathcal{R}_0=\frac{\beta(1-\alpha)}{\gamma_R}+\frac{\beta\alpha(\gamma_H+\psi)}{\gamma_H\psi}$$
+
+Given this, $\beta$ in the model can be estimated from input model parameters as: 
+
+$$\beta=\frac{\mathcal{R}_0\gamma_R\gamma_H\psi}{\big((1-\alpha)\gamma_H\psi+\alpha\gamma_R(\gamma_H+\psi)\big)}$$
 
 ### Hospital population, $H$, is NOT infectious  
 $$\mathbf{T}=
@@ -80,13 +97,17 @@ $$\mathbf{T}=
 \mathbf{\Sigma}=
 \begin{bmatrix}
 -\sigma & 0 & 0  \\
-\sigma(1-\alpha) & \gamma_R & 0  \\
+\sigma(1-\alpha) & -\gamma_R & 0  \\
 \sigma\alpha & 0 & -\gamma_H  \\
 \end{bmatrix}$$
 
+$$\mathbf{-\Sigma^{-1}}=
+\begin{bmatrix}
+1/\sigma & 0 & 0 \\
+(1-\alpha)/\gamma_R & 1/\gamma_R & 0 \\
+\alpha/\gamma_H & 0 & 1/\gamma_H \\
+\end{bmatrix}$$
 
-$$\mathcal{R}_0=\beta\sigma\frac{(1-\alpha)\gamma_H+\alpha\gamma_R}{\gamma_R\gamma_H}$$
+$$\mathcal{R}_0=\frac{\beta(1-\alpha)}{\gamma_R}+\frac{\beta\alpha}{\gamma_H}$$
 
-This means that beta in the model should be estimated from input model parameters as: 
-
-$$\beta=\frac{\mathcal{R}_0\gamma_R\gamma_H}{\sigma\big((1-\alpha)\gamma_H+\alpha\gamma_R\big)}$$
+$$\beta=\frac{\mathcal{R}_0\gamma_R\gamma_H}{\big((1-\alpha)\gamma_H+\alpha\gamma_R\big)}$$
