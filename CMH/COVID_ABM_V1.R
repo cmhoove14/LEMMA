@@ -36,13 +36,52 @@
     trans.work <- 0.05
     trans.school <- 0.075
     trans.other <- 0.025
+    trans.asymp <- 0.61  #Reduction in transmission probability from pre/asymptomatics (https://doi.org/10.1101/2020.03.15.20036582)
   
-  # Infection progression parameters
-    latent <- 3
-  
+  # Infection progression parameters all either exponentially or erlang distributed in order to compare to mass-action analogs
+    # Latent period
+      t.latent <- function(...) {rgamma(1, 11, 2)} # erlang distribution with mean 5.5 days, low variance
+      
+    # Presymptomatic period (basically incubation period-latent period, this could maybe use some work)
+      t.presymp <- function(...) {rgamma(1, 1, 2)} # erlang distribution with mean 0.5 days
+      
+    # Probability of being asymptomatic vs. becoming mildly symptomatic
+      p.asymp <- function(age) {dplyr::case_when(age %in% c(0:9) ~ 0.03,
+                                                 age %in% c(10:19) ~ 0.05,
+                                                 age %in% c(20:29) ~ 0.3,
+                                                 age %in% c(30:39) ~ 0.55,
+                                                 age %in% c(40:49) ~ 0.61,
+                                                 age %in% c(50:59) ~ 0.75,
+                                                 age %in% c(60:69) ~ 0.89,
+                                                 age %in% c(70:79) ~ 0.9,
+                                                 age > 80 ~ 0.9)}
+      
+    # Time spent asymptomatic before recovery 
+      t.asymp <- function(...) {rgamma(1, 6, 1)} # erlang distribution with mean 6 days, longish tail
+      
+    # Probability of progressing from mildly to severely symptomatic
+      p.sevsymp <- function(age) {dplyr::case_when(age %in% c(0:9) ~ 0.004,
+                                                 age %in% c(10:19) ~ 0.004,
+                                                 age %in% c(20:29) ~ 0.01,
+                                                 age %in% c(30:39) ~ 0.04,
+                                                 age %in% c(40:49) ~ 0.09,
+                                                 age %in% c(50:59) ~ 0.13,
+                                                 age %in% c(60:69) ~ 0.19,
+                                                 age %in% c(70:79) ~ 0.2,
+                                                 age > 80 ~ 0.25)}
+      
+    # Time spent mildly symptomatic before recovery if B(1, p.sevsymp)=1
+      t.msymp <- function(...) {rexp(1, 9)}
+      
+    # Time spent mildly symptomatic before progressing to severely symptomatic if B(1, p.sevsymp)=1
+      t.mtosev <- function(...) {rgamma(1, 7, 2)}
+      
+    # Time spent severely symptomatic before recovery
+      t.sevsymp <- function(...) {rgamma(1, 40, 4)} # erlang distribution with mean 10 days, low variance
+        
   # Network parameters
     r.net.prob <- 0.5     # Probability of random interaction pre-intervention
-    r.net.prob.sip <- 0.1 # Probability of random interaction for shelter in place
+    r.net.prob.sip <- 0.05 # Probability of random interaction while in shelter in place
 
 # Network matrix through time
   base.net <- matrix(data = 0, ncol = N, nrow = N)
@@ -60,8 +99,8 @@
 # ---------------------------------------------------------
   
 #Example age distribution data    
-  pop.props <- c(2.9,2.9,2.7,2.4,3.4,3.4,3.1,3,3.1,3.5,3.1,2.9,2.7,3.2,2.6,1.9,1.4,1,0.6,0.1,0)
-  names(pop.props) <- c(seq(0,100,5)[-1], "100+")
+  pop.props <- c(2.9+2.9,2.7+2.4,3.4+3.4,3.1+3,3.1+3.5,3.1+2.9,2.7+3.2,2.6+1.9,1.4+1,0.6+0.1+0)
+  names(pop.props) <- c(seq(0,90,10)[-1], "90+")
   pop.ages <- as.numeric(sample(names(pop.props), N, replace = TRUE, prob = pop.props))
 
 # example family size proportions
@@ -185,8 +224,12 @@ for(s in unique(school.membership[!is.na(school.membership)])){
 # SIMULATE TRANSMISSION
 
 # ---------------------------------------------------------
+  
 init.infection <- sample(c(rep("E", e.seed),
-                           rep("I", i.seed),
+                           rep("Ip", ip.seed),
+                           rep("Ia", ia.seed),
+                           rep("Im", im.seed),
+                           rep("Is", is.seed),
                            rep("R", r.seed),
                            rep("S", s.seed)), N, replace = FALSE)
   
