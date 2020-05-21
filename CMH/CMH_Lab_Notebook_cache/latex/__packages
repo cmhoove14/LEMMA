@@ -13,3 +13,9 @@ dplyr
 stringr
 forcats
 LEMMA
+deSolve
+network
+networkDynamic
+ergm
+tergm
+EpiModel

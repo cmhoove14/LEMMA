@@ -68,6 +68,76 @@ Didn't make it to STAN on the 11th, so want to try and get an idea of some of th
 # 5/18/2020  
 Fixed some algebra slip-ups in the $\mathcal{R}_0$ calculation for the model in the `LEMMA_model` document  
 
+# 5/19/2020  
+Working on some initial network-based agent based models. read Maya and Mark's `Adaptive Surveillance` doc. From a coding perspective, making the model run quickly and having fairly flexible implementation of different interventions (e.g. testing, isolating) will be the most challenging. From a practical standpoint, having a realistic contact/network structure may be the most challenging. The `EpiModel` package seems like a good place to start, gonna toy around with that a bit now. Specifically, going to try constructing a stochastic network model with the package which uses the `tergm` and `networkDynamic` packages to implement separable-temporal exponential-family random graph models (STERGMs; whatever that means...) Basically following the [tutorial on the EpiModel website](http://statnet.org/tut/BasicNet.html)   
+
+## Working with `EpiModel` package   
+* Good background on networks and terminology [here](http://statnet.org/nme/d1-s6.pdf)  
+  * Network characteristics to consider:  
+    * **degree distribution**: distribution of number of connections per node   
+    * **geodesic distribution**: distribution of the shortest path between nodes  
+    * **component size distribution**: distribution of the size of different components if multiple unconnected components in the network  
+    
+### Step 1) Develop network characteristics  
+#### Set network size and characteristics  
+```{r EpiModel_first, message=FALSE}
+require(EpiModel)
+
+# Initialize network with n=1000
+N <- 1000
+
+nw <- network.initialize(n = N, directed = FALSE)
+
+# Add characteristics to the vertexes of the network
+  # add race characteristic; here 500 A and 500 W 
+  nw <- set.vertex.attribute(nw, "race", c(rep("A", 500), rep("W", 500)))
+  # Add household characteristic (assumes mean HH size of 5, this could be more data-informed)
+  nw <- set.vertex.attribute(nw, "house", sample(c(1:200), 1000, replace = T))
+```
+
+NOTE: could add these characteristics from a separate data frame in which household, race, occupation, dormitory, major, etc. could be correlated and drawn from an empirical distribution of some sort
+
+#### Set network partnership formation formula  
+Here we declare characteristics of the network in order to generate edges. This consists of a `formation` formula that declares relationships between nodes based on their characteristics and a `target.stats` vector which gives the expected number of edges given the number of nodes, the network characteristics between nodes (e.g. their mean degree) and their relationships as declared in the `formation` formula.
+
+```{r network_partnership}
+formation <- ~edges + nodefactor("race") + nodematch("race") + concurrent
+
+tot.mean.degree <- 2
+raceA.mean.degree <- 1
+prob.same.race.edge <- 0.75
+prob.concurrent <- 0.7
+
+target.stats <- c(N/2*tot.mean.degree, 500*raceA.mean.degree, (N/2*tot.mean.degree)*prob.same.race.edge, prob.concurrent*N)
+```
+
+#### Get network dissolution formula  
+Rate at which network dissolves 
+
+```{r dissolution_formula}
+coef.diss <- dissolution_coefs(dissolution = ~offset(edges), duration = 10)
+coef.diss
+```
+
+#### Fit network  
+```{r fit_net, eval = FALSE}
+netfit1 <- netest(nw, 
+                  formation = formation, 
+                  target.stats = target.stats,
+                  coef.diss = coef.diss,
+                  edapprox = FALSE)
+```
+
+The above took forever to run, and I'm also beginning to question whether all this fuss is really worth it when the contact networks we want to simulate aren't necessarily all that complicated. `EpiModel` seems to be more suited for e.g. sexually transmitted diseases where contact networks relevant to transmission are clearly defined and are fairly dynamic and structured through time. For SARS-CoV2, relationships that lead to contacts that lead to transmission probably fall into one of two categories: highly persistent (e.g. households) or highly random (e.g. the person that I passed on the street that wasn't wearing a mask)
+
+# 5/20/20  
+Bummed that I spent the entire day trying to get the `EpiModel` package to work only to give up on it, but I think it's best to just start with an ABM from scratch at this point. There are a couple good places to start, including in Maya and Mark's document, but also [this code from epirecipe](http://epirecip.es/epicookbook/chapters/karlsson/intro) and [this covid abm from oxford](https://github.com/BDI-pathogens/OpenABM-Covid19/blob/master/documentation/covid19_model.pdf)
+
+Started coding the ABM (`COVID_ABM_V1.R`). Have code to generate a network as a matrix, but would be good to inform network characteristics with more data. Would be even better to code so that users could input network characteristics and resulting transmission probabilities and then simulate from there. Could be implemented as a spreadsheet with three columns: number of edges in this part of the network, transmission probability along these edges, and now I've forgotten the third one... Maybe specific transmission characteristics associated with each part of the network? Anyways, basically finished code to generate network structure, now working on simulating transmission on top of the network and then will incorporate interventions.
+
+# 5/21/20  
+
+
 # Potential improvements/ideas (running list)    
 
 ## Network models to examine sub-epidemics (like Mission study), implications for effectiveness of SiP, opening back up  
