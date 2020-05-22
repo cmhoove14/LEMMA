@@ -99,7 +99,6 @@ new.infection <- function(contact.mat, inf.ind, inf.multiplier){
 # ---------------------------------------------------------
 # SETUP
 # TODO: incorporate testing frequency/testing regime
-# TODO: get netrowk parameters for pre/post intervention, incorporate into network dynamics
 # ---------------------------------------------------------
 
 # Number of people, time frame, and time step
@@ -347,7 +346,7 @@ init.infection <- sample(c(rep("E", e.seed),
     t1.net <- add.r.edges(t1.net, r.net.prob, trans.other)
     class(t1.net) <- "numeric"
   #store starting network
-    net.mat[,,1] <- 
+    net.mat[,,1] <- t1.net
 
 # Run simulation
 for(t in 2:(t.tot/dt)){
@@ -364,6 +363,7 @@ for(t in 2:(t.tot/dt)){
     }
     
 # Update network based on epi advances and interventions
+# TODO: Implement infection influence on contact    
   t.net <- base.net  
   # Eliminate school connections if schools closed and increase hh contacts
     if(t.sc <= (t*dt) & (t*dt) <= t.sc.end){
@@ -372,6 +372,8 @@ for(t in 2:(t.tot/dt)){
       t.net[which(t.net == "S")] <- 0
     # Add random network component to network
       t.net <- add.r.edges(t.net, r.net.prob.sc, trans.other)
+      
+  # Eliminate work and school connections if schools closed and increase hh contacts
     } else if(t.sip <= (t*dt) & (t*dt) <= t.sip.end){
       t.net[which(t.net == "H")] <- trans.hh*trans.hh.sip
       t.net[which(t.net == "W")] <- 0
@@ -388,12 +390,12 @@ for(t in 2:(t.tot/dt)){
       t.net <- add.r.edges(t.net, r.net.prob, trans.other)
     } 
     
-  #store resulting network
+  #store resulting network in network array
     class(t.net) <- "numeric"
     net.mat[,,t] <- t.net
 
 #Generate new infections across network 
-  # Indices of pre/asymptomatic transmitters
+  # Indices of different types of transmitters transmitters
     a.p.transmitters <- which(inf.mat[,t] %in% c("Ip", "Ia"))  
     m.s.transmitters <- which(inf.mat[,t] %in% c("Im", "Is"))  
    
@@ -404,7 +406,6 @@ for(t in 2:(t.tot/dt)){
       } else {
         new.Es1 <- rep(0, N)
       }
-                      
 
     # Transmissions from mild/severely symptomatic individuals
       if(length(m.s.transmitters) > 0){
@@ -419,7 +420,7 @@ for(t in 2:(t.tot/dt)){
   # Update infection status matrix with new Es  
     inf.mat[new.Es,t] <- "E"
     
-  # Update transition times matrix from sample of latent period dist'n
+  # Update transition times matrix for new Es from sample of latent period dist'n
     t.til.nxt[new.Es,t] <- sapply(1:length(new.Es), t.latent)
   
   # Anyone who hasn't changed infection state remains the same
