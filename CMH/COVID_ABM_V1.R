@@ -69,15 +69,36 @@ add.r.edges <- function(start.net, r.rate, r.trans.rate){
   return(new.net)
 }
 
-new.infection <- function(){
-  
+# Function to get degree for contact network
+get.degree <- function(net.mat){
+  net.mat[which(net.mat>0)] <- 1
+  rowSums(net.mat)
 }
 
-
+#Function to generate new infections given contact matrix and indices of people who are infectious
+# Restricts the contact matrix (`contact.mat`) to include only those columns corresponding to infectious people based on `inf.ind`
+# Then goes through each row and performs a bernoulli trial based on the transmission probability in each cell
+# Equivalent to a chance of infection for every contact if contact exists (else the cell is 0)
+# Returns a vector of row indicies corresponding to new infections to enter the E compartment
+# Infection multiplier allows alteration of the infection probability, e.g. if contacts are with asymptomatics and want to model reduced infectiousness
+new.infection <- function(contact.mat, inf.ind, inf.multiplier){
+  #drop=F allows apply to proceed even if length(inf.ind=1) since apply expects a matrix 
+  init.Es <- t(apply(contact.mat[,inf.ind,drop=F], 1, function(e){ 
+    sapply(e, function(beta) rbinom(1, 1, (1-exp(-beta*inf.multiplier)))) 
+  }))
+  # Make sure summing over rows since if inf.ind=1, above returns a 1xN matrix rather than Nx1 rows
+  if(dim(init.Es)[1] == 1){
+    new.Es <- colSums(init.Es)
+  } else {
+    new.Es <- rowSums(init.Es)
+  }
+                   
+  return(new.Es)
+}
 
 # ---------------------------------------------------------
 # SETUP
-# TODO: incorporate testing frequency/teting regime
+# TODO: incorporate testing frequency/testing regime
 # TODO: get netrowk parameters for pre/post intervention, incorporate into network dynamics
 # ---------------------------------------------------------
 
@@ -97,10 +118,11 @@ new.infection <- function(){
     trans.hh.sc <- 1.2     # increase in hh transmission when schools are closed
     trans.hh.sip <- 1.3    # increase in hh transmission when sheltered in place
     r.net.prob <- 0.5      # Probability of random interaction pre-intervention
+    r.net.prob.sc <- 0.4  # Probability of random interaction while schools are closed
     r.net.prob.sip <- 0.05 # Probability of random interaction while in shelter in place
     
 # Initial conditions
-  e.seed <- 10    #Exposed
+  e.seed <- 1     #Exposed
   ip.seed <- 0    #infected pre-symptomatic
   ia.seed <- 0    #infected asymptomatic
   im.seed <- 0    #infected mildly symptomatic
@@ -263,30 +285,30 @@ new.infection <- function(){
 # combn function returns all pairwise combinations of individuals in the network membership index   
   
 # household network
-for(f in unique(family.membership[!is.na(family.membership)])){
-  f.index <- which(family.membership==f)
-  base.net[t(combn(f.index, 2))] <- trans.hh
+for(h in unique(family.membership[!is.na(family.membership)])){
+  h.index <- which(family.membership==h)
+  base.net[t(combn(h.index, 2))] <- "H"
 }
 
 # work network
 for(w in unique(work.membership[!is.na(work.membership)])){
   w.index <- which(work.membership==w)
-  if(length(w.index)==1){
+  if(length(w.index)==1){ # If one worker in the workplace, messes this up so just skip
     NULL
   } else {
-    base.net[t(combn(w.index, 2))] <- trans.work
+    base.net[t(combn(w.index, 2))] <- "W"
   }
 }
 
 # school network
 for(s in unique(school.membership[!is.na(school.membership)])){
   s.index <- which(school.membership==s)
-  base.net[t(combn(s.index, 2))] <- trans.school
+  base.net[t(combn(s.index, 2))] <- "S"
 }
 
 # Make network matrix symmetric
-  base.net[lower.tri(base.net)] = t(base.net)[lower.tri(base.net)]
-    
+  base.net <- sym.mat(base.net)
+  
 # ---------------------------------------------------------
 
 # SIMULATE TRANSMISSION
@@ -303,6 +325,7 @@ init.infection <- sample(c(rep("E", e.seed),
                            rep("R", r.seed),
                            rep("S", s.seed)), N, replace = FALSE)
   
+# Fill infection and state transition matrices based on initial conditions  
   inf.mat[,1] <- init.infection  
   t.til.nxt[,1] <- sapply(inf.mat[,1], function(i){
     dplyr::case_when(i == "E" ~ t.latent(), 
@@ -314,35 +337,61 @@ init.infection <- sample(c(rep("E", e.seed),
                      TRUE ~ NA_real_)
   })
 
-# Add random network component to starting network
-  t1.net <- add.r.edges(base.net, r.net.prob, trans.other)
+#Prepare network for t1  
+  # Replace contacts with transmission probabilities
+    t1.net <- base.net
+    t1.net[which(t1.net == "H")] <- trans.hh
+    t1.net[which(t1.net == "W")] <- trans.work
+    t1.net[which(t1.net == "S")] <- trans.school
+  # Add random network component to starting network
+    t1.net <- add.r.edges(t1.net, r.net.prob, trans.other)
+    class(t1.net) <- "numeric"
   #store starting network
-  net.mat[,,1] <- t1.net
+    net.mat[,,1] <- 
 
 # Run simulation
 for(t in 2:(t.tot/dt)){
-#Advance transition times
+  print(t)
+# Advance transition times
     t.til.nxt[,t] <- t.til.nxt[,(t-1)]-dt
   
   # Advance expired states to next state 
     nexts <- which(t.til.nxt[,t] < 0) # states that expired
-    next.mat <- t(mapply(next.state, inf.mat[nexts,(t-1)], pop.ages[nexts])) # function returns new states and time spent in new state
-    inf.mat[nexts,t] <- next.mat[1,] # update infection status matrix
-    t.til.nxt[nexts,t] <- as.numeric(next.mat[,2]) # update waiting time matrix
+    if(length(nexts >0)){
+      next.mat <- t(mapply(next.state, inf.mat[nexts,(t-1)], pop.ages[nexts])) # function returns new states and time spent in new state
+      inf.mat[nexts,t] <- next.mat[,1] # update infection status matrix
+      t.til.nxt[nexts,t] <- as.numeric(next.mat[,2]) # update waiting time matrix
+    }
     
 # Update network based on epi advances and interventions
   t.net <- base.net  
-  # Eliminate school network connections if schools closed and increase hh contacts
-    if(t.sc <= t & t <= t.sc.end){
-      t.net[which(t.net == trans.school)] <- 0
-    }  
-  # Eliminate work network connections if shelter in place  
-    if(t.sip <= t & t <= t.sip.end){
-      t.net[which(t.net == trans.work)] <- 0
-    }  
+  # Eliminate school connections if schools closed and increase hh contacts
+    if(t.sc <= (t*dt) & (t*dt) <= t.sc.end){
+      t.net[which(t.net == "H")] <- trans.hh*trans.hh.sc
+      t.net[which(t.net == "W")] <- trans.work
+      t.net[which(t.net == "S")] <- 0
+    # Add random network component to network
+      t.net <- add.r.edges(t.net, r.net.prob.sc, trans.other)
+    } else if(t.sip <= (t*dt) & (t*dt) <= t.sip.end){
+      t.net[which(t.net == "H")] <- trans.hh*trans.hh.sip
+      t.net[which(t.net == "W")] <- 0
+      t.net[which(t.net == "S")] <- 0
+    # Add random network component to network
+      t.net <- add.r.edges(t.net, r.net.prob.sip, trans.other)
+      
+  # If not in shelter in place or school closure, network remains the same plus random connections    
+    } else {
+      t.net[which(t.net == "H")] <- trans.hh
+      t.net[which(t.net == "W")] <- trans.work
+      t.net[which(t.net == "S")] <- trans.school
+    # Add random network component to network
+      t.net <- add.r.edges(t.net, r.net.prob, trans.other)
+    } 
     
+  #store resulting network
+    class(t.net) <- "numeric"
+    net.mat[,,t] <- t.net
 
-    
 #Generate new infections across network 
   # Indices of pre/asymptomatic transmitters
     a.p.transmitters <- which(inf.mat[,t] %in% c("Ip", "Ia"))  
@@ -350,30 +399,33 @@ for(t in 2:(t.tot/dt)){
    
   # Bernouli trial across all rows times transmitter columns where p(infection)~contact
     # Transmission from pre/asymtpomatic infections with reduction in transmissibility 
-    if(length(a.p.transmitters) > 0){
-      new.Es1 <- rowSums(t(apply(net.mat[,a.p.transmitters,t], 1, function(e){ 
-        sapply(e, function(beta) rbinom(1, 1, (1-exp(-beta*trans.asymp)))) 
-      })))
-    } else {
-      new.Es1 <- 0
-    }  
+      if(length(a.p.transmitters) > 0){
+        new.Es1 <- new.infection(net.mat[,,t], a.p.transmitters, trans.asymp)
+      } else {
+        new.Es1 <- rep(0, N)
+      }
+                      
 
     # Transmissions from mild/severely symptomatic individuals
-    if(length(m.s.transmitters) > 0){
-      new.Es2 <- rowSums(t(apply(net.mat[,m.s.transmitters,t], 1, function(e){ 
-        sapply(e, function(beta) rbinom(1, 1, (1-exp(-beta)))) 
-      })))
-    } else {
-      new.Es2 <- 0
-    }  
-      
-    #Index of individuls who enter E compartment
-    new.Es <- which(new.Es1+new.Es2 > 0)
+      if(length(m.s.transmitters) > 0){
+        new.Es2 <- new.infection(net.mat[,,t], m.s.transmitters, 1)
+      } else {
+        new.Es2 <- rep(0, N)
+      }
+
+  # Index of individuls who enter E compartment (new infections)
+    new.Es <- which(new.Es1+new.Es2 > 0 & inf.mat[,(t-1)] == "S")
     
-  # Update infection matrix with new Es  
+  # Update infection status matrix with new Es  
     inf.mat[new.Es,t] <- "E"
     
   # Update transition times matrix from sample of latent period dist'n
     t.til.nxt[new.Es,t] <- sapply(1:length(new.Es), t.latent)
+  
+  # Anyone who hasn't changed infection state remains the same
+    sames <- which(is.na(inf.mat[,t]))
+    inf.mat[sames,t] <- inf.mat[sames,(t-1)]
       
+  # On to the next one  
 }
+    

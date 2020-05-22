@@ -133,31 +133,38 @@ Started coding the ABM (`COVID_ABM_V1.R`). Have code to generate a network as a 
 # 5/21/20  
 Added transmission parameters, created to do list for ABM below as well as some initial description of the ABM (see below). Also started working on implementing transmission across the network. Next step is to implement dynamic updating of the network based on interventions, testing, and infection status
 
+# 5/22/20  
+Working on updating network based on interventions. Then will work on implementing testing and its effects. After that, can begin adding nuance like some workplaces remaining open, individual heterogeneities, etc. Basic model runs with transmission occurring across network, interventions affecting network. Now need to add effects of infection on network, e.g. severely infectious people stop interacting with most everyone and then add testing and contact tracing effects on network. 
+
 # ABM TODOs  
 ## Network TODOs  
 * Inform random network generation with individual characteristics, e.g. some individuals more "social": higher probability of generating random edges  
-* Introduce heterogeneity in workplace network: e.g. some networks dissolved under shelter in place, others persist (essential workers)  
-* Implement effects of interventions (school closures, shelter in place) on network  
+* Introduce heterogeneity in workplace network: e.g. some work networks dissolved under shelter in place, others persist (essential workers). Maybe have one type of workplace be healthcare workers whcih specifically interact with severely symptomatic individuals?    
+* Implement infection influence on network  
 * Look at network characteristics like mean degree, degree distribution  
 * Implement testing and isolation on network  
 
 ## Transmission TODOs  
-* Transmission to households influenced by size/income of household  
+* Transmission to households influenced by size/income of household (e.g. ability to isolate within home)  
 * Check $\mathcal{R}_0$ in relation to network and transmission probabilities. Pretty sure largest eigen value of the network matrix with entries equal to transmission probabilities can be interpreted as $\mathcal{R}_0$ in which case we have $\mathcal{R}_0\approx5.4$, which is maybe a bit high but in the right ballpark.  
 * Introduce isolation and testing  
 
-## Other TODOs
+## Other TODOs  
 * Convert some processes into functions for parsimony  
-* Transfer some functions to C++ to speed up?  
+* Introduce nighttime/daytime connections depending on time step, dt. E.g. if dt = 1/2 would have 1 active period, one inactive period per day, if dt = 1/3 two active periods, one inactive per day, and so on  
+* Ways to speed up? Transfer some/all functions to `C++`, do some profiling, etc.  
 
 # ABM Description  
 ## Network structure  
-Individuals can be members of different networks such as work, family, school that are constant through time in the absence of interventions. They also participate in random networks that are generated at every time step. School closures eliminate the school-based network (e.g. all contacts in school network to 0), and also increase familial contacts (e.g. within household). Shelter in place reduces the generation of random edges in the network and also increases household contacts between household members who are not in essential workforce and therefore either work from home or are laid off.  
+Individuals can be members of different networks such as work, family, school that are constant through time in the absence of interventions. They also participate in random networks that are generated at every time step based on parameter `r.net.prob`. School closures eliminate the school-based network (e.g. all transmission probabilities in school network to 0), increase familial contacts (e.g. within household), and reduce random edge generation from `r.net.prob` to `r.net.prob.sc`. Shelter in place reduces the generation of random edges to `r.net.prob.sip` and also increases household contacts **between household members who are not in essential workforce and therefore either work from home or are laid off (NOT IMPLEMENTED YET)**. The contact matrix is an $N\times N\times T$ array in which each $t$ slice contains a symmetric matrix with entries corresponding to the transmission probability between $i$ and $j$ were one of them to be infectious and the other susceptible.  
 
 ## Transmission  
-The transmission model across the network is a modified SEIR that allows for variability in symptom severity by including presymptomatic ($I_P$), asymptomatic ($I_A$), mildly symptomatic ($I_M$), and severely symptomatic ($I_S$) states. This allows infection status to influence behaviors such as test-seeking and self-isolation and variability in transmissibility. Parameters fall under two categories, `t.___` parameters draw from a distribution to generate a time until the next event occurs and `p.___` vectors draw from a distribution to generate a probability that some event occurs. For instance, `p.asymp` draws from a beta distribution to get a probability that the infected individual will be asymptomatic, this probability is then used in a bernouli trial where success is defined as the individual transitioning to $I_A$ where they then draw from `t.asymp` to determine how long they will remain asymptomatic before recovering.  
+The transmission model across the network is a modified SEIR that allows for variability in symptom severity by including presymptomatic ($I_P$), asymptomatic ($I_A$), mildly symptomatic ($I_M$), and severely symptomatic ($I_S$) states. This allows infection status to influence behaviors such as test-seeking and self-isolation and variability in transmissibility. Parameters fall under two categories, `t.___` parameters draw from a distribution to generate a time until the next event occurs and `p.___` parameters return a probability of transitioning to one state or another at each transition (e.g. asymptomatic or not). Probability of being asymptomatic and probability of severely symptomatic are age-dependent. As an example: `p.asymp` gets a probability that the infected individual will be asymptomatic, this probability is then used in a bernouli trial where success is defined as the individual transitioning to $I_A$ where they then draw from `t.asymp` to determine how long they will remain asymptomatic before recovering. 
+
+Transition times are stored in the `t.til.nxt` matrix  and infection status is stored in the `inf.mat` matrix, each with dimensions $N\times T$. Each matrix is updated at the beginning of each model iteration. If an entry in the `t.til.nxt` matrix becomes negative, the function `next.state` is implemented to determine the next state and the time that will be spent in that state. Following these updates to infection status, the network is updated. School closures and shelter in place interventions alter the network as described above, and then random edges are built with function `add.r.edges` with probabilities influenced by interventions **and individual heterogeneities (NOT IMPLEMENTED YET)**. Finally, transmission is simulated across the network using function `new.infection` which reduces the contact matrix to only those columns corresonding to infectious individuals, then performs a Bernoulli trial row by row to simulate the probability a contact results in transmission. New infections are then added to `inf.mat` if the Bernoulli trial is successful and the corresponding row is susceptible. For these new infections, `t.latent` is also sampled and added to the `t.til.nxt` matrix.  
 
 ## Interventions  
+Interventions such as school closures and shelter in place are currently implemented based on user input times (e.g. `t.sip` & `t.sip.end`) and affect the network as described above. Test-trace-isolate intervention occurs as follows: **NOT YET IMPLEMENTED, TO DISCUSS... user can input a matrix with columns corresponidng to time of testing, number of tests. How are tests allocated towards individuals at each time point?? Options include: random, based on their contact history, systematic (e.g. given N tests per month, N/4 individuals receive a test every fourth week)**
 
 ## Testing  
 
