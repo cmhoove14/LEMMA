@@ -131,19 +131,24 @@ Bummed that I spent the entire day trying to get the `EpiModel` package to work 
 Started coding the ABM (`COVID_ABM_V1.R`). Have code to generate a network as a matrix, but would be good to inform network characteristics with more data. Would be even better to code so that users could input network characteristics and resulting transmission probabilities and then simulate from there. Could be implemented as a spreadsheet with three columns: number of edges in this part of the network, transmission probability along these edges, and now I've forgotten the third one... Maybe specific transmission characteristics associated with each part of the network? Anyways, basically finished code to generate network structure, now working on simulating transmission on top of the network and then will incorporate interventions.
 
 # 5/21/20  
+Added transmission parameters, created to do list for ABM below as well as some initial description of the ABM (see below). Also started working on implementing transmission across the network. Next step is to implement dynamic updating of the network based on interventions, testing, and infection status
 
 # ABM TODOs  
 ## Network TODOs  
 * Inform random network generation with individual characteristics, e.g. some individuals more "social": higher probability of generating random edges  
-* Introduce heterogeneity in workplace network: e.g. some networks dissolved under shelter in place, others persists (essential workers)  
+* Introduce heterogeneity in workplace network: e.g. some networks dissolved under shelter in place, others persist (essential workers)  
 * Implement effects of interventions (school closures, shelter in place) on network  
+* Look at network characteristics like mean degree, degree distribution  
+* Implement testing and isolation on network  
 
 ## Transmission TODOs  
 * Transmission to households influenced by size/income of household  
+* Check $\mathcal{R}_0$ in relation to network and transmission probabilities. Pretty sure largest eigen value of the network matrix with entries equal to transmission probabilities can be interpreted as $\mathcal{R}_0$ in which case we have $\mathcal{R}_0\approx5.4$, which is maybe a bit high but in the right ballpark.  
+* Introduce isolation and testing  
 
 ## Other TODOs
-* Resolve time step of model and transition times  
 * Convert some processes into functions for parsimony  
+* Transfer some functions to C++ to speed up?  
 
 # ABM Description  
 ## Network structure  
