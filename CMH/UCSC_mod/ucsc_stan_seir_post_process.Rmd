@@ -1,0 +1,68 @@
+---
+title: "UCSC STAN model"
+author: "Chris Hoover"
+date: "5/23/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+require(tidyverse)
+require(ggplot2)
+```
+
+```{r load_stan}
+stan_obj <- readRDS("stan_fit_2020-05-24.RDS")
+
+```
+
+```{r plot_Rt}
+Rt <- stan_obj[["Rt"]]
+
+Rt_sum <- t(apply(Rt, 2, function(d){
+  Rt.med <- median(d)
+  Rt.mean <- mean(d)
+  Rt.75 <- quantile(d, 0.75)
+  Rt.25 <- quantile(d, 0.25)
+  Rt.975 <- quantile(d, 0.975)
+  Rt.025 <- quantile(d, 0.025)
+  
+  return(c(Rt.mean, Rt.med, Rt.75, Rt.25, Rt.975, Rt.025))
+}))
+
+colnames(Rt_sum) <- c("Rt_mean", "Rt_med", "Rt_75th", "Rt_25th", "Rt_975th", "Rt_025th")
+
+Rt_sum <- Rt_sum %>% as_tibble() %>% 
+  mutate(obs = row_number(),
+         Date = as.Date(startdate_str+obs))
+
+Rt_sum %>% 
+  ggplot() +
+    geom_ribbon(aes(x = Date, ymin = Rt_25th, ymax = Rt_75th),
+                fill = "blue", alpha = 0.3) +
+    geom_ribbon(aes(x = Date, ymin = Rt_025th, ymax = Rt_975th),
+                fill = "blue", alpha = 0.1) +
+    geom_line(aes(x = Date, y = Rt_mean), col = "darkblue") +
+    geom_vline(xintercept = as.Date("2020-03-17"),
+               col = "darkred") +
+    geom_vline(xintercept = Sys.Date(),
+               col = "black") +
+    theme_bw() +
+    theme(axis.text = element_text(size = 12),
+          axis.title = element_text(size = 14)) +
+    labs(x = "Date", y = expression(R[t]))
+```
+
+
+```{r sf_plot}
+stan_obj$x %>%
+
+sf_long %>% 
+  filter(metric %in% c("cum_case", "cum_death", "ICU_CONF", "HOSP_CONF")) %>% 
+  ggplot() +
+    geom_point(aes(x = Date, y = count, col = metric)) +
+    theme_bw() 
+    
+```
+

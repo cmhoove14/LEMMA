@@ -198,7 +198,7 @@ transformed data {
     
     // compute b-splines, now that knots are known
     bsplines = compute_b_splines(nt, t, nbeta, beta_knots, p);
-    #print("bsplines = ", bsplines)
+    // print("bsplines = ", bsplines)
 }
 parameters {
     //specifying parameters bounds (not always necessary) for the parameters that are being estimated

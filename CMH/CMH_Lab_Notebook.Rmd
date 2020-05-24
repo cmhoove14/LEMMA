@@ -136,6 +136,9 @@ Added transmission parameters, created to do list for ABM below as well as some 
 # 5/22/20  
 Working on updating network based on interventions. Then will work on implementing testing and its effects. After that, can begin adding nuance like some workplaces remaining open, individual heterogeneities, etc. Basic model runs with transmission occurring across network, interventions affecting network. Now need to add effects of infection on network, e.g. severely infectious people stop interacting with most everyone and then add testing and contact tracing effects on network. 
 
+# 5/23-24/20  
+Forked (more like copy-pasted) UCSC SEIR stan model to start toying with it. Went through the actual code in more detail, but still not at a point where I understand it to the point where I feel like I could rebuild it from scratch. Which is probably a bit of a lofty goal anyways. First step is to be able to get it to run which require getting input data and putting it in the right format for the stan model. Got data for SF from their API and cleaned it. Code pulls directly from their website so should be nice and reproducible. Also got the stan model to run after some toying with it and then do some post-processing and plotting.  
+
 # ABM TODOs  
 ## Network TODOs  
 * Inform random network generation with individual characteristics, e.g. some individuals more "social": higher probability of generating random edges  
