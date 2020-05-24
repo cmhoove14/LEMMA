@@ -1,0 +1,38 @@
+Josh Maya Chris 5/22/20 notes
+- Josh found which counties had increases in mobility and which had enough data and then tried to determine if mobility actually influences cases
+	- Data from anywhere other than CA/Bay Area is fairly crap, cases deaths ok, but hospitalizations hard to come by
+		- Most places don't have solid hospitalizations data
+	-Indiana (Indianapolis) and St. Louis data might be accessible
+		- Hospitalizations census and admissions, but they don't necessarily add up
+-Rt issue: probably underfitting right now, but how do we fit more and what's the right amount of fitting?
+	-**Come up with a gameplan for improvements to LEMMA**
+		-How does Rt change?
+		-Issue with St. Louis on hospital admissions and census data
+			-model structure wrong or is there something with the data that's wrong?
+				-e.g. hospitalization length of stay
+		-Should people maybe move to using SC model?
+			-What if we add our front end excel inputs to their backend model?
+			-Freeze LEMMA and fork UCSC?
+			-Basically how do we improve the backend of LEMMA while maintaining front end that people are comfortable with now?
+			-Get it to work with SF and then see if we can add X feature to their model 
+				-Maybe add PUIs to model fitting and see if we can make it work?
+			-Two population model probably necessary in the near future: in STAN, or an improvement to LEMMA?
+	* Two directions: Mission project and Berkeley Safe Campus study (could probably go one way or the other)
+		-Mission study next steps: disparities angle, but also concentrated epidemic angle;
+			-How much can we actually demonstrate this quantitatively?
+				-e.g. essential workers and latinx community driving epidemic
+				-How do we use modeling to extend this point?
+					-How can we say something quantitative about extent of the picture in SF driven by concentrated epidemic?
+						-Combine mission study with hospitalization data in some way
+					-Supportive role for main paper
+			-Separate paper on the role of essential workers, role of those unable to shelter in places
+				-How does concentrated epidemic change the way we think about testing and SIP
+				-How do we do targeted intervention e.g. pay people to stay home who wouldn't otherwise be able to?
+		-Berkeley safe campus study -> touch base with Ivana, Jeremy, etc.
+			-They have a target parameter and everything but are also doing simulations and stuff
+***Priorities: 
+	-buffing up LEMMA or adapting SC?
+	-using ABM to say something quantitative about nature of mission study/outbreak
+	-role of two-population model as well and comparison to LEMMA
+
+	

@@ -1,0 +1,36 @@
+UCSC LEMMA 5/22/20
+-Some agenda items: should we go to a full MCMC/STAN approach?
+-Some potential updates to models
+	-Time dependent testing
+	-Open population, e.g. case importation
+	-SafeGraph data: mobility /movement data between counties that could inform 
+-Comparisons between models 
+	-UCSC fitting to hospitalizations, cases, deaths, icus
+		-Also ran model more recently, so comparisons to LEMMA are maybe using a bit less data
+	-LEMMA doesn't have case fitting because of testing issue, but could turn on if necessary
+		-Maybe need to move towards more data-driven inflection points?
+			-Movement data influences R, more inflection points, something like that
+	-Would be good to have some way to review past projections and see how they're doing in comparison to present/truth	
+	
+	-Alameda
+		-R looking a bit uncertain, hovering around 1 or so
+	-SF
+		-UCSC
+			-Has a bit of a bump in early May, unkown why
+			-Rt appears to be less than 1
+			-Only confirmed cases, not incorporating PUIs
+		-LEMMA
+			-Median Rt appears to be ~0.86, prettyuch the same as UCSC model
+			-Maybe becoming less reliable to rely on prior estimates for R/when R changes
+	-SC
+		-UCSC
+			-R maybe going up again here?
+		-LEMMA
+			-Median R around 0.74, very little data (few hospitalizations, icus, etc.)
+	-Santa Clara
+		-UCSC
+			-Starts a bit late, no hospitalizations until early April
+			-Sort of builds in early stage of exponential growth to get to these high initial numbers
+			-Rt a bit below 1 again, 0.8 or so
+		-LEMMA
+			-Rt aroud 0.7ish
