@@ -142,6 +142,21 @@ Forked (more like copy-pasted) UCSC SEIR stan model to start toying with it. Wen
 # 5/25/20  
 Edited the stan model to incorporate PUIs into the model. New stan model is `SEIR_PUI.stan`. Also evaluated model fits with this model compared to the original. Summary is in `stan_with_pui` Rmd/pdf. It doesn't make much of a difference, but it does bring down future projections a little bit. Not entirely sure how to make sense of this actually.  
 
+# 5/26/20  
+Working on getting to the bottom of some warning messages thrown by STAN when running the model:  
+* **Maximum treedepth exceeded** - seems to be a harmless warning more to do with efficiency than any model error; see [here](https://mc-stan.org/misc/warnings.html#maximum-treedepth-exceeded)  
+* **Largest R-hat is NA**  
+* **Bulk and tail effective sampling size (ESS)** too low  
+* Occasionally getting a **divergent transitions** error which seems to be the only one that's truly problematic  
+
+Many of the suggestions on how to fix these involved running more chains/running more iterations. Tried a model run with 500 burnin/warmup, with 4500 subsequent samples with thinning every two samples (so effective sample size ~2250 per chain) and still got max treedepth, R-hat, Bulk ESS, and Tail ESS warnings as well as divergent transitions warning.
+
+Tried increasing the `adapt_delta` parameter up to 0.9 (from default of 0.8) to fix the divergent transitions. Also increased the distance in time between spline knots as something tells me that allowing beta to be too flexible along with all the other parameters may cause identifiability issues. Running with above settings takes far too long, so just running with 1000 iterations, 100 burn in, no thinning.
+
+Ok, so the R hat and sample size warnings are fine because some of the model outputs are included as "posteriors" and since e.g. initial hospitalizations are always 0, most of the posterior metrics can't be estimated or end up as NA.
+
+The divergent transitions are probably still a major issue that needs to be resolved, though, and increasing `adapt_delta` to 0.9 didn't seem to fix the problem. Increased to 0.95 and that eliminated the divergent transitions and left me with only the R-hat, treedepth, and ESS errors
+
 # ABM TODOs  
 ## Network TODOs  
 * Inform random network generation with individual characteristics, e.g. some individuals more "social": higher probability of generating random edges  
