@@ -11,12 +11,20 @@ knitr::opts_chunk$set(echo = FALSE,
 
 require(tidyverse)
 require(ggplot2)
+require(rstan)
 ```
 
 ```{r load_stan}
+today <- Sys.Date()
+stan_file <- list.files("Outputs/")[which(grepl(as.character(today),list.files("Outputs/")))]
+data_file <- list.files("Data/")[which(grepl(as.character(today),list.files("Data/")) &
+                                         grepl("long",list.files("Data/")))]
+
 # Stan model fit object from `run_ucsc_stan_seir.R` 
-stan_obj <- readRDS("stan_fit_2020-05-24.RDS")
-sf_long <- readRDS("Data/sf_data_2020-05-24.RDS")
+stan_obj <- readRDS(paste("Outputs/", stan_file, sep = ""))
+  stan_obj <- extract(stan_obj)
+
+sf_long <- readRDS(paste("Data/", data_file, sep = ""))
   
 startdate_str <- as.Date("2020-02-16")
 
@@ -53,10 +61,10 @@ Rt_sum <- Rt_sum %>% as_tibble() %>%
 
 Rt_sum %>% 
   ggplot() +
-    geom_ribbon(aes(x = Date, ymin = Rt_25th, ymax = Rt_75th),
-                fill = "blue", alpha = 0.3) +
     geom_ribbon(aes(x = Date, ymin = Rt_025th, ymax = Rt_975th),
                 fill = "blue", alpha = 0.1) +
+    geom_ribbon(aes(x = Date, ymin = Rt_25th, ymax = Rt_75th),
+                fill = "blue", alpha = 0.3) +
     geom_line(aes(x = Date, y = Rt_mean), col = "darkblue") +
     geom_vline(xintercept = as.Date("2020-03-17"),
                col = "darkred") +
@@ -69,6 +77,33 @@ Rt_sum %>%
 ```
 
 ## Fraction tested through time    
+```{r plot_test_frac}
+testfrac <- stan_obj[["fractested"]]
+
+testfrac_sum <- t(apply(testfrac, 2, stan_post_sum))
+
+colnames(testfrac_sum) <- c("tf_mean", "tf_med", "tf_75th", "tf_25th", "tf_975th", "tf_025th")
+
+testfrac_sum <- testfrac_sum %>% as_tibble() %>% 
+  mutate(obs = row_number(),
+         Date = as.Date(startdate_str+obs))
+
+testfrac_sum %>% 
+  ggplot() +
+    geom_ribbon(aes(x = Date, ymin = tf_025th, ymax = tf_975th),
+                fill = "gold", alpha = 0.1) +
+    geom_ribbon(aes(x = Date, ymin = tf_25th, ymax = tf_75th),
+                fill = "gold", alpha = 0.3) +
+    geom_line(aes(x = Date, y = tf_mean), col = "gold3") +
+    geom_vline(xintercept = as.Date("2020-03-17"),
+               col = "darkred") +
+    geom_vline(xintercept = Sys.Date(),
+               col = "black") +
+    theme_bw() +
+    theme(axis.text = element_text(size = 12),
+          axis.title = element_text(size = 14)) +
+    labs(x = "Date", y = "Fraction Tested")
+```
 
 ## State variables and model fit  
 

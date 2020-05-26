@@ -51,7 +51,7 @@ sf_long <- sf_case %>%
   pivot_longer(-Date, names_to = "metric", values_to = "count")
 
 saveRDS(sf_long,
-       file = paste("CMH/UCSC_mod/sf_data_", Sys.Date(), ".RDS", sep = ""))
+       file = paste("CMH/UCSC_mod/Data/sf_long_data_", Sys.Date(), ".RDS", sep = ""))
 # -----------------------------------------------------
 
 # Data prep
@@ -141,7 +141,7 @@ seir_inputs[['mu_beta1']] = 0.2
 seir_inputs[['sigma_beta1']] = 0.02
 
 # distance in time between the knots used to construct the splines 
-seir_inputs[['dknot']] = 10
+seir_inputs[['dknot']] = 14
 
 # spline mode (must be 1 or 2)
 # splinemode = 1: estimate beta up to today
@@ -169,18 +169,34 @@ seir_inputs[['sigma_beta_inter']] = array(0.5)
 
 # -----------------------------------------------------
 
+nthin = 1
+niter = 2000
+nchain = ncore = 1
+nwarm = niter/10
+nref = niter/20
+
 stan_seir_fit <- stan(
   file = "CMH/UCSC_mod/UCSC_SEIR.stan",
   data = seir_inputs,
-  thin = 5,
-  chains = 3,
-  warmup = 1000,
-  iter = 5000,
-  cores = 3,
-  refresh = 100
+  thin = nthin,
+  chains = nchain,
+  warmup = nwarm,
+  iter = niter,
+  cores = ncore,
+  refresh = nref,
+  control = list(adapt_delta = 0.95)
 )
 
-stan_obj <- extract(stan_seir_fit, permuted = T)
+ stan_seir_sum <- summary(stan_seir_fit)
+# rel_pars <- row.names(stan_seir_sum[["summary"]])[1:30]
 
-saveRDS(stan_obj,
-        file = paste("CMH/UCSC_mod/stan_fit_", Sys.Date(), ".RDS", sep = ""))
+# pairs(stan_seir_fit, pars = rel_pars[1:11])
+
+# stan_obj <- extract(stan_seir_fit, permuted = T)
+
+saveRDS(stan_seir_fit,
+        file = paste("CMH/UCSC_mod/Outputs/UCSC_SEIR_", 
+                     nchain, "chains_",
+                     niter, "iterations_",
+                     nthin, "thinning_",
+                     Sys.Date(), ".RDS", sep = ""))
