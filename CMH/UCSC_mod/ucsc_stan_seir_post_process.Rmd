@@ -1,35 +1,49 @@
 ---
-title: "UCSC STAN model"
+title: "UCSC STAN model plots"
 author: "Chris Hoover"
 date: "5/23/2020"
 output: pdf_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = FALSE,
+                      warning = FALSE)
 
 require(tidyverse)
 require(ggplot2)
 ```
 
 ```{r load_stan}
+# Stan model fit object from `run_ucsc_stan_seir.R` 
 stan_obj <- readRDS("stan_fit_2020-05-24.RDS")
+sf_long <- readRDS("Data/sf_data_2020-05-24.RDS")
+  
+startdate_str <- as.Date("2020-02-16")
 
+# Summary function to get summaries across posteriors
+stan_post_sum <- function(d){
+  thing.med <- median(d)
+  thing.mean <- mean(d)
+  thing.75 <- quantile(d, 0.75)
+  thing.25 <- quantile(d, 0.25)
+  thing.975 <- quantile(d, 0.975)
+  thing.025 <- quantile(d, 0.025)
+  
+  return(c("q.mean" = thing.mean, 
+           "q.50" = thing.med, 
+           "q.75" = thing.75, 
+           "q.25" = thing.25, 
+           "q.975" = thing.975, 
+           "q.025" = thing.025))
+}
 ```
+
+## $R_t$  
 
 ```{r plot_Rt}
 Rt <- stan_obj[["Rt"]]
 
-Rt_sum <- t(apply(Rt, 2, function(d){
-  Rt.med <- median(d)
-  Rt.mean <- mean(d)
-  Rt.75 <- quantile(d, 0.75)
-  Rt.25 <- quantile(d, 0.25)
-  Rt.975 <- quantile(d, 0.975)
-  Rt.025 <- quantile(d, 0.025)
-  
-  return(c(Rt.mean, Rt.med, Rt.75, Rt.25, Rt.975, Rt.025))
-}))
+Rt_sum <- t(apply(Rt, 2, stan_post_sum))
 
 colnames(Rt_sum) <- c("Rt_mean", "Rt_med", "Rt_75th", "Rt_25th", "Rt_975th", "Rt_025th")
 
@@ -54,15 +68,135 @@ Rt_sum %>%
     labs(x = "Date", y = expression(R[t]))
 ```
 
+## Fraction tested through time    
 
-```{r sf_plot}
-stan_obj$x %>%
+## State variables and model fit  
 
-sf_long %>% 
-  filter(metric %in% c("cum_case", "cum_death", "ICU_CONF", "HOSP_CONF")) %>% 
-  ggplot() +
-    geom_point(aes(x = Date, y = count, col = metric)) +
-    theme_bw() 
-    
+```{r state_vars_sum}
+# State variables summary from model
+state_vars <- c("S", "E", "Ia", "Im", "Ip", "Hosp", "Hicu", "Rlive", "Rdead")
+  
+state_var_sums <- do.call(rbind, lapply(1:dim(stan_obj$x)[2], function(s){
+  as_tibble(t(apply(stan_obj$x[,s,],2,stan_post_sum))) %>% 
+    mutate(State = state_vars[s],
+           obs = row_number(),
+           Date = as.Date(startdate_str+obs))
+}))
+
+colnames(state_var_sums)[1:6] <- c("var_mean", "var_med", "var_75th", "var_25th", "var_975th", "var_025th")
+
+# Observed infections (since we don't observe all infections output by actual model)
+I_obs_sum <- stan_obj[["mu_Iobs"]]
+
+I_obs_sum <- t(apply(I_obs_sum, 2, stan_post_sum))
+
+colnames(I_obs_sum) <- c("Iobs_mean", "Iobs_med", "Iobs_75th", "Iobs_25th", "Iobs_975th", "Iobs_025th")
+ 
+I_obs_sum <- I_obs_sum %>% as_tibble() %>% 
+  mutate(obs = row_number(),
+         Date = as.Date(startdate_str+obs))
+```
+
+### Observed Infections  
+```{r Is}
+ggplot() +
+  theme_bw() +
+  theme(axis.text.x = element_text(size = 11, 
+                                   angle = 45,
+                                   hjust = 1),
+        axis.title = element_text(size = 14)) +
+  geom_ribbon(data = I_obs_sum,
+              aes(x = Date, 
+                  ymax = Iobs_75th,
+                  ymin = Iobs_25th),
+              fill = "coral",
+              alpha = 0.3) +
+  geom_ribbon(data = I_obs_sum,
+              aes(x = Date, 
+                  ymax = Iobs_975th,
+                  ymin = Iobs_025th),
+              fill = "coral",
+              alpha = 0.1) +
+  geom_point(data = sf_long %>% 
+               filter(metric %in% c("cum_case")),
+             aes(x = Date, y = count),
+             pch = 17) +
+  geom_line(data = I_obs_sum,
+            aes(x = Date, y = Iobs_mean),
+            col = "coral") +
+  scale_x_date(date_labels = "%m/%d", 
+               date_breaks = "7 day",
+               limits = as.Date(c("2020-02-16",
+                                  "2020-06-15")))+
+  ylim(c(0,5000)) +
+  labs(y = "cumulative infections",
+       title = "SF Observed and fit infections")
+```
+
+### Hospitalizations and ICU  
+```{r hosp}
+ggplot() +
+  theme_bw() +
+  theme(axis.text.x = element_text(size = 11, 
+                                   angle = 45,
+                                   hjust = 1),
+        axis.title = element_text(size = 14)) +
+# Hospitalizations uncertainty intervals  
+  geom_ribbon(data = state_var_sums %>% 
+                filter(State == "Hosp"),
+              aes(x = Date, 
+                  ymax = var_75th,
+                  ymin = var_25th),
+              fill = "lightblue",
+              alpha = 0.3) +
+  geom_ribbon(data = state_var_sums %>% 
+                filter(State == "Hosp"),
+              aes(x = Date, 
+                  ymax = var_975th,
+                  ymin = var_025th),
+              fill = "lightblue",
+              alpha = 0.1) +
+# ICU uncertainty intervals
+  geom_ribbon(data = state_var_sums %>% 
+                filter(State == "Hicu"),
+              aes(x = Date, 
+                  ymax = var_75th,
+                  ymin = var_25th),
+              fill = "darkblue",
+              alpha = 0.3) +
+  geom_ribbon(data = state_var_sums %>% 
+                filter(State == "Hicu"),
+              aes(x = Date, 
+                  ymax = var_975th,
+                  ymin = var_025th),
+              fill = "darkblue",
+              alpha = 0.1) +
+# Observed data
+  geom_point(data = sf_long %>% 
+               filter(metric %in% c("HOSP_CONF", "ICU_CONF")),
+             aes(x = Date, y = count, col = metric),
+             pch = 17) +
+  scale_color_manual(values = c("lightblue", "darkblue"),
+                     labels = c("Hospitalized", "ICU")) +
+# Model means
+  geom_line(data = state_var_sums %>% 
+                filter(State == "Hosp"),
+            aes(x = Date, y = var_mean),
+            col = "lightblue") +
+  geom_line(data = state_var_sums %>% 
+                filter(State == "Hicu"),
+            aes(x = Date, y = var_mean),
+            col = "darkblue") +
+# Formatting
+  scale_x_date(date_labels = "%m/%d", 
+               date_breaks = "7 day",
+               limits = as.Date(c("2020-02-16",
+                                  "2020-06-15")))+
+  ylim(c(0,max(sf_long %>% 
+                 filter(metric %in% c("HOSP_CONF", "ICU_CONF")) %>% 
+                 pull(count), na.rm = T)+25)) +
+  labs(y = "Hospitalizations and ICU",
+       title = "SF Observed and fit hospitalizations and ICU")
+
 ```
 

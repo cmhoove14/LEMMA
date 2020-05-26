@@ -139,6 +139,9 @@ Working on updating network based on interventions. Then will work on implementi
 # 5/23-24/20  
 Forked (more like copy-pasted) UCSC SEIR stan model to start toying with it. Went through the actual code in more detail, but still not at a point where I understand it to the point where I feel like I could rebuild it from scratch. Which is probably a bit of a lofty goal anyways. First step is to be able to get it to run which require getting input data and putting it in the right format for the stan model. Got data for SF from their API and cleaned it. Code pulls directly from their website so should be nice and reproducible. Also got the stan model to run after some toying with it and then do some post-processing and plotting.  
 
+# 5/25/20  
+Edited the stan model to incorporate PUIs into the model. New stan model is `SEIR_PUI.stan`. Also evaluated model fits with this model compared to the original. Summary is in `stan_with_pui` Rmd/pdf. It doesn't make much of a difference, but it does bring down future projections a little bit. Not entirely sure how to make sense of this actually.  
+
 # ABM TODOs  
 ## Network TODOs  
 * Inform random network generation with individual characteristics, e.g. some individuals more "social": higher probability of generating random edges  

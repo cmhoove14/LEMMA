@@ -1,0 +1,465 @@
+---
+title: "Stan with PUI"
+author: "Chris Hoover"
+date: "5/25/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,
+                      warning = FALSE)
+
+require(tidyverse)
+require(rstan)
+
+# Rstan prep
+options(mc.cores = parallel::detectCores())
+rstan_options(auto_write = TRUE)
+Sys.setenv(LOCAL_CPPFLAGS = '-march=corei7 -mtune=corei7')
+
+```
+
+# Purpose  
+Compare model fits when incorporating data on persons under investigation (PUI) in hospitals. PUIs are those who are suspected as potential COVID cases who have not yet been confirmed positive.
+
+The STAN model was slightly edited to include PUI by added functionality similar to how the fraction of infected cases which are detected is implemented. An additional prior is incorporated to represent the proportion of PUI who are positive. The model then incorporates this prior times the observed number of PUIs when evaluating model fit (e.g. rather than taking hospitalized and icu as observed, takes hospitalized+frac_pui_pos*hospitalized_puis as observed).
+
+# Data   
+Need two files: one with cases that has columns `Date`, `cum_cases`, and `cum_death` corresponding to the date of observation and the cumulative number of COVID cases and deaths confirmed on that date. The other with columns `date`, `ICU_PUI`, `ICU_CONF`, `HOSP_PUI`, and `HOSP_CONF` corresponding to the date of observation, the number of people under investigation in the ICU, the number of confirmed COVID patients in the ICU, and the same for hospitalized COVID patients (PUI and confirmed patients).
+
+Also takes a pretty hefty parameters list with demographics, priors, and some model settings.
+
+```{r get_data}
+# Case and hosptialization data for SF
+sf_case <- read.csv(url("https://data.sfgov.org/resource/tvq9-ec9w.csv")) %>% 
+  mutate(Date = as.Date(date)) %>% 
+  pivot_wider(names_from = case_disposition,
+              values_from = case_count) %>% 
+  group_by(Date) %>% 
+  summarise(Cases = sum(Confirmed, na.rm = T),
+            Deaths = sum(Death, na.rm = T)) %>% 
+  arrange(Date) %>% 
+  mutate(cum_case = cumsum(Cases),
+         cum_death = cumsum(Deaths))
+
+sf_hosp <- read.csv(url("https://data.sfgov.org/resource/nxjg-bhem.csv")) %>% 
+  mutate(Date = as.Date(reportdate),
+         type = ifelse(dphcategory == "ICU", "ICU", "HOSP"),
+         conf = ifelse(covidstatus == "PUI", "PUI", "CONF"),
+         hosp_stat = paste(type, conf, sep = "_")) %>% 
+  pivot_wider(names_from = hosp_stat,
+              values_from = patientcount) %>%
+  group_by(Date) %>% 
+  summarise(ICU_PUI = sum(ICU_PUI, na.rm = T),
+            ICU_CONF = sum(ICU_CONF, na.rm = T),
+            HOSP_PUI = sum(HOSP_PUI, na.rm = T),
+            HOSP_CONF = sum(HOSP_CONF, na.rm = T)) %>% 
+  arrange(Date)
+
+saveRDS(sf_case, 
+        file = paste("Data/sf_case_data_", Sys.Date(), ".RDS", sep = ""))
+
+saveRDS(sf_hosp, 
+        file = paste("Data/sf_hosp_data_", Sys.Date(), ".RDS", sep = ""))
+```
+
+```{r parameters}
+start.date = "2020-02-16"
+end.date = "2020-07-01"
+
+seir_inputs <- list()
+
+# the number of age groups
+  seir_inputs[['nage']] = 1 
+
+# the population for each age group
+  seir_inputs[['npop']] = array(883305)
+# the fraction of hospitalized cases (ICU + non-ICU)
+  seir_inputs[['frac_hosp']] = array(0.07)
+# the fraction of ICU cases
+  seir_inputs[['frac_icu']] = array(0.02)
+# the death rate of infected
+  seir_inputs[['frac_mort']] = array(0.01)
+# the fraction of asymptomatic cases
+  seir_inputs[['frac_asym']] = array(0.178)
+
+# a parameter modifying the prior uncertainty in the fractions above (set to 1000.0 for `nage` > 1)
+  seir_inputs[['alpha_multiplier']] = 100.0
+
+# mean duration in "exposed" stage
+  seir_inputs[['mu_duration_lat']] = 5.0
+# standard deviation (sd) of duration in "exposed" stage
+  seir_inputs[['sigma_duration_lat']] = 2.0
+# mean duration in "infectious" stage for asymptomatic cases
+  seir_inputs[['mu_duration_rec_asym']] = 7.0
+# sd of duration in "infectious" stage for asymptomatic cases
+  seir_inputs[['sigma_duration_rec_asym']] = 5.0
+# mean duration in "infectious" stage for mild cases
+  seir_inputs[['mu_duration_rec_mild']] = 7.0
+# sd of duration in "infectious" stage for mild cases
+  seir_inputs[['sigma_duration_rec_mild']] = 5.0
+# mean duration in "infectious" stage for hospitalized cases
+  seir_inputs[['mu_duration_pre_hosp']] = 5.0
+# sd of duration in "infectious" stage for hospitalized cases
+  seir_inputs[['sigma_duration_pre_hosp']] = 1.0
+# mean duration in hospital for non-ICU cases
+  seir_inputs[['mu_duration_hosp_mod']] = 7.0
+# sd of duration in hospital for non-ICU cases
+  seir_inputs[['sigma_duration_hosp_mod']] = 1.0
+# mean duration in hospital for ICU cases
+  seir_inputs[['mu_duration_hosp_icu']] = 16.0
+# sd of duration in hospital for ICU cases
+  seir_inputs[['sigma_duration_hosp_icu']] = 4.0
+
+# mean fraction of tested infectious
+  seir_inputs[['mu_frac_tested']] = 0.25
+# sd fraction of tested infectious
+  seir_inputs[['sigma_frac_tested']] = 0.1
+  
+# lambda parameter for initial conditions of "exposed"
+  seir_inputs[['lambda_ini_exposed']] = 0.3
+
+# mean initial beta estimate
+  seir_inputs[['mu_beta1']] = 0.2
+# sd initial beta estimate
+  seir_inputs[['sigma_beta1']] = 0.02
+
+# distance in time between the knots used to construct the splines 
+  seir_inputs[['dknot']] = 10
+
+# spline mode (must be 1 or 2)
+# splinemode = 1: estimate beta up to today
+# splinemode = 2: estimate beta up to dknot days before today, then assume constant value up to today
+  seir_inputs[['splinemode']] = 1
+
+# number of interventions
+  seir_inputs[['ninter']] = 1
+  
+# length of each intervention
+  seir_inputs[['len_inter']] = array(10)
+# mean change in beta through intervention 
+  seir_inputs[['mu_beta_inter']] = array(1.0)
+# sd change in beta through intervention
+  seir_inputs[['sigma_beta_inter']] = array(0.5)
+
+```
+
+# Run model without PUI (done silently)  
+```{r stan_original, eval = FALSE}
+case_dat = sf_case
+hosp_dat = sf_hosp
+
+# the start date at which to start the simulation
+  startdate_str = as.Date(start.date)
+
+# Timeframe for simulation. Can replace Sys.Date() with any date at which to cut off model fitting
+  itoday_1based = Sys.Date()-startdate_str
+  
+# specify the date up to when beta is estimated
+  seir_inputs[['itoday']] = as.numeric(itoday_1based)
+
+# the number of days to run the model for
+  seir_inputs[['nt']] = as.numeric(as.Date(end.date) - as.Date(start.date))
+  
+# Put data into list
+  seir_inputs[['nobs']] <- nrow(case_dat)
+  seir_inputs[['tobs']] <- as.numeric(case_dat$Date - startdate_str)
+  seir_inputs[['obs_I']] <- case_dat$cum_case
+  seir_inputs[['obs_Rmort']] <- case_dat$cum_death
+  
+  seir_inputs[['nhobs']] <- nrow(hosp_dat)
+  seir_inputs[['thobs']] <- as.numeric(hosp_dat$Date - startdate_str)
+  seir_inputs[['obs_Hmod']] <- hosp_dat$HOSP_CONF
+  seir_inputs[['obs_Hicu']] <- hosp_dat$ICU_CONF
+  
+# Note: The inputs below must be lists or arrays, even if one intervention is specified 
+# (the enclosing "[]" are not optional). For zero interventions 
+
+# start time of each interventions
+  seir_inputs[['t_inter']] = array(as.numeric(itoday_1based+5))
+  
+# NOTE: all other parameterss should already be in pars  
+  
+# Run the stan model  
+  stan_mod <- "UCSC_SEIR.stan"
+  
+stan_run <- stan(
+  file = stan_mod,
+  data = seir_inputs,
+  thin = 2,
+  chains = 3,
+  warmup = 500,
+  iter = 2500,
+  cores = 3,
+  refresh = 100
+)
+
+stan_no_pui <- extract(stan_run, permuted = T)
+
+saveRDS(stan_no_pui,
+        file = paste("Outputs/", str_split(stan_mod, ".stan")[[1]][1], "_", "SF_", Sys.Date(), ".RDS", sep = ""))
+
+```
+
+# Run model with PUI (done silently)  
+```{r stan_pui, eval = FALSE}
+seir_inputs_pui <- seir_inputs
+
+# Observed PUI data
+  seir_inputs_pui[['obs_Hpui']] <- hosp_dat$HOSP_PUI
+  seir_inputs_pui[['obs_Hpui_icu']] <- hosp_dat$ICU_PUI
+
+# mean fraction of pui who end up positive
+  seir_inputs_pui[['mu_pui_pos']] = 0.25
+# sd fraction of pui who end up positive
+  seir_inputs_pui[['sigma_pui_pos']] = 0.1
+
+stan_mod_pui <- "SEIR_PUI.stan"
+  
+stan_run2 <- stan(
+  file = stan_mod_pui,
+  data = seir_inputs_pui,
+  thin = 2,
+  chains = 3,
+  warmup = 500,
+  iter = 2500,
+  cores = 3,
+  refresh = 100
+)
+
+stan_pui <- extract(stan_run2, permuted = T)
+
+saveRDS(stan_pui,
+        file = paste("Outputs/", str_split(stan_mod_pui, ".stan")[[1]][1], "_", "SF_", Sys.Date(), ".RDS", sep = ""))
+  
+```
+
+# Compare model fits  
+```{r sum_fits}
+stan_no_pui <- readRDS("Outputs/UCSC_SEIR_SF_2020-05-25.RDS")
+stan_pui <- readRDS("Outputs/SEIR_PUI_SF_2020-05-25.RDS")
+
+# Summary function to get summaries across posteriors
+stan_post_sum <- function(d){
+  thing.med <- median(d)
+  thing.mean <- mean(d)
+  thing.75 <- quantile(d, 0.75)
+  thing.25 <- quantile(d, 0.25)
+  thing.975 <- quantile(d, 0.975)
+  thing.025 <- quantile(d, 0.025)
+  
+  return(c("q.mean" = thing.mean, 
+           "q.50" = thing.med, 
+           "q.75" = thing.75, 
+           "q.25" = thing.25, 
+           "q.975" = thing.975, 
+           "q.025" = thing.025))
+}
+
+# State variables summary from model
+state_vars <- c("S", "E", "Ia", "Im", "Ip", "Hosp", "Hicu", "Rlive", "Rdead")
+  
+# No pui run summary
+no_pui_state_vars <- do.call(rbind, lapply(1:dim(stan_no_pui$x)[2], function(s){
+  as_tibble(t(apply(stan_no_pui$x[,s,],2,stan_post_sum))) %>% 
+    mutate(State = state_vars[s],
+           obs = row_number(),
+           Date = as.Date(start.date)+obs)
+}))
+
+colnames(no_pui_state_vars)[1:6] <- c("var_mean", "var_med", "var_75th", "var_25th", "var_975th", "var_025th")
+
+# Observed infections (since we don't observe all infections output by actual model)
+I_obs_no_pui <- stan_no_pui[["mu_Iobs"]]
+
+I_obs_no_pui <- t(apply(I_obs_no_pui, 2, stan_post_sum))
+
+colnames(I_obs_no_pui) <- c("Iobs_mean", "Iobs_med", "Iobs_75th", "Iobs_25th", "Iobs_975th", "Iobs_025th")
+ 
+I_obs_no_pui <- I_obs_no_pui %>% as_tibble() %>% 
+  mutate(obs = row_number(),
+         Date = as.Date(start.date)+obs)
+
+
+# PUI run  summary
+pui_state_vars <- do.call(rbind, lapply(1:dim(stan_pui$x)[2], function(s){
+  as_tibble(t(apply(stan_pui$x[,s,],2,stan_post_sum))) %>% 
+    mutate(State = state_vars[s],
+           obs = row_number(),
+           Date = as.Date(start.date)+obs)
+}))
+
+colnames(pui_state_vars)[1:6] <- c("var_mean", "var_med", "var_75th", "var_25th", "var_975th", "var_025th")
+
+# Observed infections (since we don't observe all infections output by actual model)
+I_obs_pui <- stan_pui[["mu_Iobs"]]
+
+I_obs_pui <- t(apply(I_obs_pui, 2, stan_post_sum))
+
+colnames(I_obs_pui) <- c("Iobs_mean", "Iobs_med", "Iobs_75th", "Iobs_25th", "Iobs_975th", "Iobs_025th")
+ 
+I_obs_pui <- I_obs_pui %>% as_tibble() %>% 
+  mutate(obs = row_number(),
+         Date = as.Date(start.date)+obs)
+
+```
+
+
+## Posterior distribution of pui positive from pui model  
+```{r pui_pos_dist}
+hist(stan_pui$frac_puipos, breaks = 30,
+     xlab = "Fraction PUI positive")
+```
+
+## Case numbers  
+```{r comp_case_nums}
+pui_case_comp <- rbind(I_obs_no_pui %>% 
+                         mutate(PUI = "No"),
+                       I_obs_pui %>% 
+                         mutate(PUI = "YES"))
+
+ggplot() +
+  theme_bw() +
+  theme(axis.text.x = element_text(size = 11, 
+                                   angle = 45,
+                                   hjust = 1),
+        axis.title = element_text(size = 14)) +
+  geom_ribbon(data = pui_case_comp,
+              aes(x = Date, 
+                  ymax = Iobs_75th,
+                  ymin = Iobs_25th,
+                  fill = PUI),
+              alpha = 0.4) +
+  geom_ribbon(data = pui_case_comp,
+              aes(x = Date, 
+                  ymax = Iobs_975th,
+                  ymin = Iobs_025th,
+                  fill = PUI),
+              alpha = 0.2) +
+  geom_point(data = sf_case,
+             aes(x = Date, y = cum_case),
+             pch = 17) +
+  geom_line(data = pui_case_comp,
+            aes(x = Date, y = Iobs_mean, col = PUI)) +
+  scale_x_date(date_labels = "%m/%d", 
+               date_breaks = "7 day",
+               limits = as.Date(c("2020-02-16",
+                                  "2020-07-04")))+
+  ylim(c(0,5000)) +
+  labs(y = "cumulative infections",
+       title = "SF Observed and fit infections")
+
+```
+Not much of a difference in the fit, but projections begin to diverge after awhile.
+
+## Hospitalizations  
+```{r comp_hosp_numbers}
+pui_hosp_comp <- rbind(pui_state_vars %>% 
+                         filter(State == "Hosp") %>% 
+                         mutate(PUI = "No"),
+                       no_pui_state_vars %>% 
+                         filter(State == "Hosp") %>% 
+                         mutate(PUI = "YES"))
+
+
+ggplot() +
+  theme_bw() +
+  theme(axis.text.x = element_text(size = 11, 
+                                   angle = 45,
+                                   hjust = 1),
+        axis.title = element_text(size = 14)) +
+# Observed data
+  geom_point(data = sf_hosp,
+             aes(x = Date, y = HOSP_CONF),
+             pch = 17) +
+  geom_point(data = sf_hosp,
+             aes(x = Date, y = HOSP_CONF+HOSP_PUI),
+             pch = 16) +
+  geom_segment(data = sf_hosp,
+               aes(x = Date, 
+                   xend = Date,
+                   y = HOSP_CONF,
+                   yend = HOSP_CONF + HOSP_PUI)) +
+# Hospitalizations uncertainty intervals  
+  geom_ribbon(data = pui_hosp_comp,
+              aes(x = Date, 
+                  ymax = var_75th,
+                  ymin = var_25th,
+                  fill = PUI),
+              alpha = 0.4) +
+  geom_ribbon(data = pui_hosp_comp,
+              aes(x = Date, 
+                  ymax = var_975th,
+                  ymin = var_025th,
+                  fill = PUI),
+              alpha = 0.2) +
+# Model means
+  geom_line(data = pui_hosp_comp,
+            aes(x = Date, y = var_mean, col = PUI)) +
+# Formatting
+  scale_x_date(date_labels = "%m/%d", 
+               date_breaks = "7 day",
+               limits = as.Date(c("2020-02-16",
+                                  "2020-06-20"))) +
+  ylim(c(0,max(sf_hosp$HOSP_PUI+sf_hosp$HOSP_CONF, na.rm = T)+25)) +
+  labs(y = "Hospitalizations",
+       title = "Comparison btwn fits including PUI or not")
+
+```
+
+Not much of a difference here which I guess makes sense since we're not really changing any of the fitting criteria. Would have to allow PUI to influence how the model fits in order to start really seeing differences, I think, but that would require incorporating some mechanism to generate PUI in the model which seems like more work than it's worth.
+
+## ICUs  
+```{r comp_icu_numbers}
+pui_icu_comp <- rbind(pui_state_vars %>% 
+                         filter(State == "Hicu") %>% 
+                         mutate(PUI = "No"),
+                       no_pui_state_vars %>% 
+                         filter(State == "Hicu") %>% 
+                         mutate(PUI = "YES"))
+
+
+ggplot() +
+  theme_bw() +
+  theme(axis.text.x = element_text(size = 11, 
+                                   angle = 45,
+                                   hjust = 1),
+        axis.title = element_text(size = 14)) +
+# Observed data
+  geom_point(data = sf_hosp,
+             aes(x = Date, y = ICU_CONF),
+             pch = 17) +
+  geom_point(data = sf_hosp,
+             aes(x = Date, y = ICU_CONF+ICU_PUI),
+             pch = 16) +
+  geom_segment(data = sf_hosp,
+               aes(x = Date, 
+                   xend = Date,
+                   y = ICU_CONF,
+                   yend = ICU_CONF + ICU_PUI)) +
+# Hospitalizations uncertainty intervals  
+  geom_ribbon(data = pui_icu_comp,
+              aes(x = Date, 
+                  ymax = var_75th,
+                  ymin = var_25th,
+                  fill = PUI),
+              alpha = 0.4) +
+  geom_ribbon(data = pui_icu_comp,
+              aes(x = Date, 
+                  ymax = var_975th,
+                  ymin = var_025th,
+                  fill = PUI),
+              alpha = 0.2) +
+# Model means
+  geom_line(data = pui_icu_comp,
+            aes(x = Date, y = var_mean, col = PUI)) +
+# Formatting
+  scale_x_date(date_labels = "%m/%d", 
+               date_breaks = "7 day",
+               limits = as.Date(c("2020-02-16",
+                                  "2020-06-20"))) +
+  ylim(c(0,max(sf_hosp$ICU_PUI+sf_hosp$ICU_CONF, na.rm = T)+25)) +
+  labs(y = "ICU hospitalizations",
+       title = "Comparison btwn fits including PUI or not")
+
+```
