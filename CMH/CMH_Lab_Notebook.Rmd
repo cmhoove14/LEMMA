@@ -155,7 +155,7 @@ Tried increasing the `adapt_delta` parameter up to 0.9 (from default of 0.8) to 
 
 Ok, so the R hat and sample size warnings are fine because some of the model outputs are included as "posteriors" and since e.g. initial hospitalizations are always 0, most of the posterior metrics can't be estimated or end up as NA.
 
-The divergent transitions are probably still a major issue that needs to be resolved, though, and increasing `adapt_delta` to 0.9 didn't seem to fix the problem. Increased to 0.95 and that eliminated the divergent transitions and left me with only the R-hat, treedepth, and ESS errors
+The divergent transitions are probably still a major issue that needs to be resolved, though, and increasing `adapt_delta` to 0.9 didn't seem to fix the problem. Increased to 0.95 and that eliminated the divergent transitions and left me with only the R-hat, treedepth, and ESS errors. Tried increasing the max_treedepth control parameter as well, but it slows things down a lot.  
 
 # ABM TODOs  
 ## Network TODOs  
