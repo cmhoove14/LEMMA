@@ -65,7 +65,7 @@ saveRDS(sf_hosp,
 
 ```{r parameters}
 start.date = "2020-02-16"
-end.date = "2020-07-01"
+end.date = "2020-06-20"
 
 seir_inputs <- list()
 
@@ -186,12 +186,13 @@ hosp_dat = sf_hosp
 stan_run <- stan(
   file = stan_mod,
   data = seir_inputs,
-  thin = 2,
+  thin = 1,
   chains = 3,
-  warmup = 500,
-  iter = 2500,
+  warmup = 200,
+  iter = 1000,
   cores = 3,
-  refresh = 100
+  refresh = 100,
+  control = list(adapt_delta = 0.95)
 )
 
 stan_no_pui <- extract(stan_run, permuted = T)
@@ -219,12 +220,13 @@ stan_mod_pui <- "SEIR_PUI.stan"
 stan_run2 <- stan(
   file = stan_mod_pui,
   data = seir_inputs_pui,
-  thin = 2,
+  thin = 1,
   chains = 3,
-  warmup = 500,
-  iter = 2500,
+  warmup = 200,
+  iter = 1000,
   cores = 3,
-  refresh = 100
+  refresh = 100,
+  control = list(adapt_delta = 0.95)
 )
 
 stan_pui <- extract(stan_run2, permuted = T)
@@ -236,8 +238,8 @@ saveRDS(stan_pui,
 
 # Compare model fits  
 ```{r sum_fits}
-stan_no_pui <- readRDS("Outputs/UCSC_SEIR_SF_2020-05-25.RDS")
-stan_pui <- readRDS("Outputs/SEIR_PUI_SF_2020-05-25.RDS")
+stan_no_pui <- readRDS("Outputs/UCSC_SEIR_SF_2020-05-26.RDS")
+stan_pui <- readRDS("Outputs/SEIR_PUI_SF_2020-05-26.RDS")
 
 # Summary function to get summaries across posteriors
 stan_post_sum <- function(d){
@@ -304,11 +306,67 @@ I_obs_pui <- I_obs_pui %>% as_tibble() %>%
 
 ```
 
-
 ## Posterior distribution of pui positive from pui model  
 ```{r pui_pos_dist}
 hist(stan_pui$frac_puipos, breaks = 30,
      xlab = "Fraction PUI positive")
+```
+
+## Posterior distribution for hospitalization parameters   
+```{r comp_hosp_distns}
+hosp_duration_comp <- rbind(data.frame(hosp_duration = stan_no_pui$duration_hosp_mod,
+                                       PUI = "No"),
+                            data.frame(hosp_duration = stan_pui$duration_hosp_mod,
+                                       PUI = "YES"))
+
+hosp_duration_comp %>% 
+  ggplot() +
+    geom_density(aes(hosp_duration, fill = PUI),
+                 alpha = 0.7) +
+    theme_bw() +
+    xlab("Hospitalized duration")
+```
+
+```{r comp_icu_distns}
+icu_duration_comp <- rbind(data.frame(icu_duration = stan_no_pui$duration_hosp_icu,
+                                       PUI = "No"),
+                            data.frame(icu_duration = stan_pui$duration_hosp_icu,
+                                       PUI = "YES"))
+
+icu_duration_comp %>% 
+  ggplot() +
+    geom_density(aes(icu_duration, fill = PUI),
+                 alpha = 0.7) +
+    theme_bw() +
+    xlab("ICU duration")
+```
+
+```{r comp_sigma_Hmod}
+sigma_Hmod_comp <- rbind(data.frame(sigma_Hmod = stan_no_pui$sigma_Hmod,
+                                       PUI = "No"),
+                            data.frame(sigma_Hmod = stan_pui$sigma_Hmod,
+                                       PUI = "YES"))
+
+sigma_Hmod_comp %>% 
+  ggplot() +
+    geom_density(aes(sigma_Hmod, fill = PUI),
+                 alpha = 0.7) +
+    theme_bw() +
+    xlab("Sigma Hmod")
+```
+
+```{r comp_sigma_Hicu}
+sigma_Hicu_comp <- rbind(data.frame(sigma_Hicu = stan_no_pui$sigma_Hicu,
+                                       PUI = "No"),
+                            data.frame(sigma_Hicu = stan_pui$sigma_Hicu,
+                                       PUI = "YES"))
+
+sigma_Hicu_comp %>% 
+  ggplot() +
+    geom_density(aes(sigma_Hicu, fill = PUI),
+                 alpha = 0.7) +
+    theme_bw() +
+    xlab("Sigma Hicu")
 ```
 
 ## Case numbers  
@@ -326,25 +384,25 @@ ggplot() +
         axis.title = element_text(size = 14)) +
   geom_ribbon(data = pui_case_comp,
               aes(x = Date, 
-                  ymax = Iobs_75th,
-                  ymin = Iobs_25th,
-                  fill = PUI),
-              alpha = 0.4) +
-  geom_ribbon(data = pui_case_comp,
-              aes(x = Date, 
                   ymax = Iobs_975th,
                   ymin = Iobs_025th,
                   fill = PUI),
               alpha = 0.2) +
+  geom_ribbon(data = pui_case_comp,
+              aes(x = Date, 
+                  ymax = Iobs_75th,
+                  ymin = Iobs_25th,
+                  fill = PUI),
+              alpha = 0.4) +
+  geom_line(data = pui_case_comp,
+            aes(x = Date, y = Iobs_mean, col = PUI)) +
   geom_point(data = sf_case,
              aes(x = Date, y = cum_case),
              pch = 17) +
-  geom_line(data = pui_case_comp,
-            aes(x = Date, y = Iobs_mean, col = PUI)) +
   scale_x_date(date_labels = "%m/%d", 
                date_breaks = "7 day",
                limits = as.Date(c("2020-02-16",
-                                  "2020-07-04")))+
+                                  "2020-06-18")))+
   ylim(c(0,5000)) +
   labs(y = "cumulative infections",
        title = "SF Observed and fit infections")
@@ -383,16 +441,16 @@ ggplot() +
 # Hospitalizations uncertainty intervals  
   geom_ribbon(data = pui_hosp_comp,
               aes(x = Date, 
-                  ymax = var_75th,
-                  ymin = var_25th,
-                  fill = PUI),
-              alpha = 0.4) +
-  geom_ribbon(data = pui_hosp_comp,
-              aes(x = Date, 
                   ymax = var_975th,
                   ymin = var_025th,
                   fill = PUI),
               alpha = 0.2) +
+  geom_ribbon(data = pui_hosp_comp,
+              aes(x = Date, 
+                  ymax = var_75th,
+                  ymin = var_25th,
+                  fill = PUI),
+              alpha = 0.4) +
 # Model means
   geom_line(data = pui_hosp_comp,
             aes(x = Date, y = var_mean, col = PUI)) +
@@ -400,7 +458,7 @@ ggplot() +
   scale_x_date(date_labels = "%m/%d", 
                date_breaks = "7 day",
                limits = as.Date(c("2020-02-16",
-                                  "2020-06-20"))) +
+                                  "2020-06-18"))) +
   ylim(c(0,max(sf_hosp$HOSP_PUI+sf_hosp$HOSP_CONF, na.rm = T)+25)) +
   labs(y = "Hospitalizations",
        title = "Comparison btwn fits including PUI or not")
@@ -437,19 +495,19 @@ ggplot() +
                    xend = Date,
                    y = ICU_CONF,
                    yend = ICU_CONF + ICU_PUI)) +
-# Hospitalizations uncertainty intervals  
-  geom_ribbon(data = pui_icu_comp,
-              aes(x = Date, 
-                  ymax = var_75th,
-                  ymin = var_25th,
-                  fill = PUI),
-              alpha = 0.4) +
+# Icus uncertainty intervals  
   geom_ribbon(data = pui_icu_comp,
               aes(x = Date, 
                   ymax = var_975th,
                   ymin = var_025th,
                   fill = PUI),
               alpha = 0.2) +
+  geom_ribbon(data = pui_icu_comp,
+              aes(x = Date, 
+                  ymax = var_75th,
+                  ymin = var_25th,
+                  fill = PUI),
+              alpha = 0.4) +
 # Model means
   geom_line(data = pui_icu_comp,
             aes(x = Date, y = var_mean, col = PUI)) +
@@ -457,7 +515,7 @@ ggplot() +
   scale_x_date(date_labels = "%m/%d", 
                date_breaks = "7 day",
                limits = as.Date(c("2020-02-16",
-                                  "2020-06-20"))) +
+                                  "2020-06-18"))) +
   ylim(c(0,max(sf_hosp$ICU_PUI+sf_hosp$ICU_CONF, na.rm = T)+25)) +
   labs(y = "ICU hospitalizations",
        title = "Comparison btwn fits including PUI or not")
