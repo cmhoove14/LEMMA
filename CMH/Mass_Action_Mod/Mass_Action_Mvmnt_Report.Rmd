@@ -1,0 +1,380 @@
+---
+title: "Movement Forced COVID Model"
+author: "Chris Hoover"
+date: "5/27/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+require(deSolve)
+require(ggplot2)
+require(tidyverse)
+
+```
+
+# Purpose  
+Use movement data incorporated into a dynamic model of COVID transmission via a forcing function to fit early-stage outbreak dynamics and forecast transmission into the future using movement projections.
+
+# Movement Data  
+## Descartes Labs  
+Technical report [here](https://arxiv.org/pdf/2003.14228.pdf). Data represents "the median of the max-distance mobility for all samples in the specified region" derived from anonymized mobile phone data.
+```{r descartes}
+descartes <- read.csv(url("https://raw.githubusercontent.com/descarteslabs/DL-COVID-19/master/DL-us-mobility-daterow.csv"))
+
+descartes_sf <- descartes %>% 
+  filter(admin1 == "California" & admin2 == "San Francisco County")
+
+t0 <- as.Date("2020-02-16")
+t.end <- as.Date(descartes_sf$date[nrow(descartes_sf)])
+
+descartes_sf %>% 
+  ggplot(aes(x = as.Date(date), y = m50)) + 
+    geom_line() +
+    theme_bw() +
+    scale_x_date(date_labels = "%m/%d", 
+               date_breaks = "7 day") +
+    theme(axis.title = element_text(size = 14,
+                                    face = "bold"),
+          axis.text = element_text(size = 12),
+          axis.text.x = element_text(angle = 45,
+                                     hjust = 1)) +
+    labs(x = "Date",
+         y = "Movement",
+         title = "Descartes Movement for San Francisco County")
+```
+
+# Epi Data  
+```{r sf_epi_data}
+# Case and hosptialization data for SF
+sf_hosp <- read.csv(url("https://data.sfgov.org/resource/nxjg-bhem.csv")) %>% 
+  mutate(Date = as.Date(reportdate),
+         type = ifelse(dphcategory == "ICU", "ICU", "HOSP"),
+         conf = ifelse(covidstatus == "PUI", "PUI", "CONF"),
+         hosp_stat = paste(type, conf, sep = "_")) %>% 
+  pivot_wider(names_from = hosp_stat,
+              values_from = patientcount) %>%
+  group_by(Date) %>% 
+  summarise(ICU_PUI = sum(ICU_PUI, na.rm = T),
+            ICU_CONF = sum(ICU_CONF, na.rm = T),
+            HOSP_PUI = sum(HOSP_PUI, na.rm = T),
+            HOSP_CONF = sum(HOSP_CONF, na.rm = T)) %>% 
+  arrange(Date) %>% 
+  mutate(HOSP_tot = ICU_CONF + HOSP_CONF,
+         HOSP_max = ICU_CONF + HOSP_CONF + ICU_PUI + HOSP_PUI,
+         cumICUconf = cumsum(ICU_CONF),
+         cumICUpui = cumsum(ICU_PUI),
+         cumHOSPconf = cumsum(HOSP_CONF),
+         cumHOSPpui = cumsum(HOSP_PUI))
+
+sf_case <- read.csv(url("https://data.sfgov.org/resource/tvq9-ec9w.csv")) %>% 
+  mutate(Date = as.Date(date)) %>% 
+  pivot_wider(names_from = case_disposition,
+              values_from = case_count) %>% 
+  group_by(Date) %>% 
+  summarise(Cases = sum(Confirmed, na.rm = T),
+            Deaths = sum(Death, na.rm = T)) %>% 
+  arrange(Date) %>% 
+  mutate(cum_case = cumsum(Cases),
+         cum_death = cumsum(Deaths))
+
+sf_test <- read.csv(url("https://data.sfgov.org/resource/nfpa-mg4g.csv")) %>% 
+  mutate(Date = as.Date(result_date)) %>% 
+  arrange(Date) %>% 
+  mutate(cum_tests = cumsum(tests),
+         cum_pos = cumsum(pos))
+
+sf_all <- sf_test %>% 
+  dplyr::select(Date, tests, pos, neg, pct, indeterminate, cum_tests, cum_pos) %>%
+  full_join(sf_case, by = "Date") %>% 
+  full_join(sf_hosp, by = "Date")
+```
+
+
+# Model  
+```{r mod_prep}
+source("COVID_ODE.R")
+
+pop.size <- 883305
+t.sim <- as.numeric(t.end - t0)
+
+# Was having trouble fitting model with t0 as march 1st, not enough time for infection to build up before movement tanks, so adding some time to ramp up
+
+t.pad <- as.numeric(t.sim - (t.end - as.Date(descartes_sf$date[1])))
+m.pad <- mean(descartes_sf$m50[1:10]) + rnorm(t.pad)
+
+descartes_force <- approxfun(as.data.frame(list(times = 1:t.sim,
+                                                move = c(m.pad, descartes_sf$m50))),
+                             rule = 2)
+
+#Starting covid parameters
+covid_pars <- list(N = pop.size,
+                   t.sim = t.sim,
+                   E.start = 1,
+                   beta = 0.1,
+                   cp = 1,
+                   ca = 0.5,
+                   cm = 0.5,
+                   cs = 0.2,
+                   sigma = 1/4,
+                   alpha = 0.4,
+                   lambda = 1,
+                   rho = 0.2,
+                   delta_1 = 1/1.2,
+                   delta_2 = 1/3,
+                   gam_a = 1/5,
+                   gam_m = 1/4,
+                   gam_h = 1/12,
+                   mu = 0.05)
+#St.devs of covid parameters
+covid_sds <- list(N = 0,
+                   t.sim = 0,
+                   E.start = 10,
+                   beta = 5,
+                   cp = 0,
+                   ca = 0.5,
+                   cm = 0.5,
+                   cs = 0.2,
+                   sigma = 1/4,
+                   alpha = 0.4,
+                   lambda = 1,
+                   rho = 0.2,
+                   delta_1 = 1/1.2,
+                   delta_2 = 1/3,
+                   gam_a = 1/5,
+                   gam_m = 1/4,
+                   gam_h = 1/12,
+                   mu = 0.05)
+
+
+```
+
+```{r par_table, echo = FALSE, include = TRUE, dev="tikz" }
+tab1 <- data.frame(val = as.character(round(as.numeric(covid_pars), 3)), 
+                   des = c("population size",
+                           "time to run simulation",
+                           "starting number of exposed",
+                           "transmission rate",
+                           "Relative contact rate between S and Ip",
+                           "Relative contact rate between S and Ia",
+                           "Relative contact rate between S and Im",
+                           "Relative contact rate between S and Is",
+                           "1/serial interval",
+                           "proportion asymptomatic",
+                           "1/(incubation period-serial interval) to model pre-symptomatic transmission",
+                           "Proportion symptomatic requiring hospitalization",
+                           "convenience parameter: 1/(delta1 + delta2) = time between symptom onset and hospitalization",
+                           "1/(delta1 + delta2) = time between symptom onset and hospitalization",
+                           "1/time to recovery (non-infectiousness) for asymptomatics",
+                           "1/time to recovery for mild cases",
+                           "1/time to removed (recovered or deceased) for hospitalized",
+                           "proportion of hospitalized cases who die"))
+
+rownames(tab1) <- c("$N$", "t.sim", "$E_0$",  "$\\beta$","$c_p$","$c_a$","$c_m$", "$c_s$",
+                    "$\\sigma$","$\\alpha$", "$\\lambda$", "$\\rho$", "$\\delta_1$", "$\\delta_2$",
+                    "$\\gamma_a$","$\\gamma_m$","$\\gamma_h$","$\\mu$")
+
+knitr::kable(tab1, row.names = TRUE, 
+             col.names = c("Value", "Definition"), 
+             format = "latex", escape = FALSE, 
+             caption = "Parameter values and descriptions used in the model")
+```
+
+```{r mod_fit}
+#Function to return "fit" (assessed by sum of squared errors) from input parameters and data
+  covid_ods_fit <- function(fit.pars, all.pars, fit_data) {
+    use.pars <- all.pars
+    par.fit.index <- which(names(all.pars) %in% names(fit.pars))
+    
+    for(p in 1:length(par.fit.index)){
+      use.pars[[par.fit.index[p]]] <- fit.pars[[p]]
+    }
+
+    # initial number of exposed as parameter
+    init <- c(S = use.pars[["N"]] - use.pars[["E.start"]],
+              E = use.pars[["E.start"]],
+              Ip = 0,
+              Ia = 0,
+              Is = 0,
+              Im = 0,
+              Ih = 0,
+              H = 0,
+              D = 0,
+              R = 0)
+    
+    # Run the model with input parameters to generate predicted quantities
+    mod.run <- as.data.frame(ode(init, 1:use.pars[["t.sim"]], covid_odes, use.pars)) %>% 
+      mutate(Date = as.Date(t0+(time-1)))
+    
+    # Join simulated and observed data
+    mod.obs.dat <- mod.run %>% 
+      full_join(fit_data, by = "Date")
+    
+    ## Calculate the log likelihood (logLike) of the data given theta (parameter set)
+  	hosp.llik <- dnorm(mod.obs.dat$H, mod.obs.dat$HOSP_CONF, mod.obs.dat$HOSP_CONF/10, log = T)
+  	mort.llik <- dnorm(mod.obs.dat$D, mod.obs.dat$cum_death, mod.obs.dat$HOSP_CONF/10, log = T)
+
+    post.llik <- sum(hosp.llik, na.rm = T) + sum(mort.llik, na.rm = T)
+    
+  	return(post.llik)
+  }
+
+```
+
+```{r covid_grid, eval=FALSE, include = FALSE}
+covid_sweeps <- expand.grid(E.start = c(1:100),
+                            beta = seq(1e-3, 0.5, by = 5e-3))
+
+require(parallel)
+opclust <- makeCluster(detectCores()-1)         # Make cluster
+clusterExport(opclust, c("covid_sweeps",
+                         "covid_pars", 
+                         "covid_ods_fit",
+                         "sf_all",
+                         "covid_odes",
+                         "descartes_force",
+                         "t0"))         # Export objects to cluster
+
+clusterEvalQ(opclust, {
+  library(deSolve)
+  library(tidyverse)
+})
+
+covid_fits <- parApply(opclust, covid_sweeps, 1, function(x){
+  covid_ods_fit(as.list(x), covid_pars, sf_all)
+})
+
+stopCluster(opclust)
+
+covid_rslts <- cbind(covid_sweeps, covid_fits)
+
+```
+
+```{r mcmcmMH_fx}
+## Metropolis-Hastings algorithm for searching parameter space (arbitrary
+## number of parameters):
+
+# This is a function that takes four parameters:
+# 1. posterior: The posterior function: A function that accepts parameter
+#    values as an argument and returns the logged value of the
+#    posterior function at these values.
+# 2. initTheta: The initial value of theta - the vector of parameter 
+#    values.
+# 3. proposalSD: The standard deviation of a Gaussian proposal
+#    distribution for the Metropolis-Hastings algorithm to search
+#    parameter space.
+# 4. numIterations: The number of iterations to run the
+#    Metropolis-Hastings algorithm for.
+# The function returns a vector of samples of theta based on the accepted
+# values from the Metropolis-Hastings algorithm.
+
+mcmcMH <- function(posterior, initTheta, proposalSD, numIterations) {
+  
+  # Evaluate the function "posterior" at "initTheta", and assign to a
+  # variable called posteriorThetaCurrent.
+  posteriorThetaCurrent <- posterior(initTheta)
+  
+  # Initialise variables to store the current value of theta, the
+  # vector of sample values, and the number of accepted proposals.
+  thetaCurrent <- initTheta
+  samples <- initTheta
+  accepted <- 0
+  
+  # Run the MCMC algorithm for numIterations interations.
+  for (i in 1:numIterations) {
+    
+    # Draw a new theta from a Gaussian proposal distribution and
+    # assign this to a variable called thetaProposed.
+    thetaProposed <- rnorm(n = length(thetaCurrent),
+                           mean = thetaCurrent, 
+                           sd = proposalSD)
+    
+    # Assign names to the thetaProposed vector.
+    names(thetaProposed) <- names(thetaCurrent)
+    
+    # Evaluate the log) posterior function at the proposed theta
+    # value and assign to a variable called 
+    # posteriorThetaProposed.
+    posteriorThetaProposed <- posterior(thetaProposed)
+    
+    # Compute the Metropolis-Hastings (log) acceptance
+    # probability and assign to a variable called
+    # logAcceptance.
+    logAcceptance <- posteriorThetaProposed -posteriorThetaCurrent
+    
+    # Draw a random number uniformly-distributed between 0 and 1
+    # using "runif" and assign to a variable called randNum.
+    randNum <- runif(n = 1, min = 0, max = 1)
+    
+    # Use the random number and the acceptance probability to 
+    # determine if thetaProposed will be accepted.
+    if (randNum < exp(logAcceptance)) {
+      
+      # If accepted, change the current value of theta to the
+      # proposed value of theta.
+      thetaCurrent <- thetaProposed
+      
+      # And update the current value of the posterior 
+      # function.
+      posteriorThetaCurrent <- posteriorThetaProposed
+      
+      # And update number of accepted proposals.
+      accepted <- accepted + 1
+    }
+    
+    # Add the current theta to the vector of samples.
+    samples <- c(samples, thetaCurrent)
+    
+    # Print the current state of chain and acceptance rate.
+    cat("iteration:", i, "chain:", thetaCurrent,
+        "acceptance rate:", accepted / i, "\n")
+  }
+  return(samples)
+}
+
+```
+
+
+```{r covid_plot}
+best.pars <- covid_pars
+best.pars[["beta"]] <- covid_rslts$beta[which(covid_fits == min(covid_fits))]
+best.pars[["E.start"]] <- covid_rslts$E.start[which(covid_fits == min(covid_fits))]
+
+best.sim <- as.data.frame(ode(init, 1:best.pars[["t.sim"]], covid_odes, best.pars)) %>% 
+  mutate(Date = as.Date(t0+time)) 
+
+ggplot() +
+  theme_bw() +
+  theme(axis.title = element_text(size = 14,
+                                  face = "bold"),
+        axis.text = element_text(size = 12),
+        axis.text.x = element_text(angle = 45,
+                                   hjust = 1)) +
+  geom_line(data = best.sim,
+            aes(x = Date, y = H),
+            col = "coral", size = 1.2) +
+  geom_point(data = sf_all,
+             aes(x = Date, y = HOSP_tot),
+             pch = 17) +
+  scale_x_date(date_labels = "%m/%d", 
+               date_breaks = "7 day")
+
+ggplot() +
+  theme_bw() +
+  theme(axis.title = element_text(size = 14,
+                                  face = "bold"),
+        axis.text = element_text(size = 12),
+        axis.text.x = element_text(angle = 45,
+                                   hjust = 1)) +
+  geom_line(data = best.sim,
+            aes(x = Date, y = D),
+            col = "coral", size = 1.2) +
+  geom_point(data = sf_all,
+             aes(x = Date, y = cum_death),
+             pch = 17) +
+  scale_x_date(date_labels = "%m/%d", 
+               date_breaks = "7 day")
+  
+```
+
