@@ -1,25 +1,20 @@
-Package: DynamicAggregation
-Description: Examines the effects of aggregation dynamics on helminthic disease elimination
-Title: dynamic aggregation and helminthic disease elimination
+Package: LEMMAABM
+Description: An agent based model of SARS-CoV2 tranmission dynamics
+Title: COVID ABM
 Version: 0.1.0
 License: CCO
 Type: Package
 Author@R: person("Christopher", "Hoover", email = "choover@berkeley.edu",
                  role = c("aut", "cre"))
 Maintainer: Christopher Hoover <choover@berkeley.edu>
-URL: https://github.com/cmhoove14/Dynamic_Aggregation
-BugReports: https://github.com/cmhoove14/Dynamic_Aggregation/issues
+URL: https://github.com/cmhoove14/LEMMA/tree/master/CMH/ABM
+BugReports: https://github.com/cmhoove14/LEMMA/tree/master/CMH/ABM/issues
 Encoding: UTF-8
 LazyData: true
 RoxygenNote: 6.1.1
 Suggests:
     ggplot2,
-    gganimate
 Depends:
-    deSolve,
-    rootSolve,
-    adaptivetau,
-    MDPtoolbox,
     dplyr
 LinkingTo: Rcpp, RcppEigen, RcppNumerical, RcppParallel
 Imports: Rcpp (>= 1.0.1)

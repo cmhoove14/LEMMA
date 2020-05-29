@@ -6,49 +6,8 @@
 
 # FUNCTIONS (to be moved to R package infrastructure)
 # ---------------------------------------------------------
-
-# Function to handle new state transitions
-# Basically a bunch of ifelse statements to advance from one state to the next once time in one state expires
-next.state <- function(pre.status, age){
-  if (pre.status == "E"){
-    post.status <- "Ip"
-    next.time <- t.presymp()
-  } else if (pre.status == "Ip"){
-    asymp <- rbinom(1, 1, p.asymp(age = age))
-    if(asymp == 1){
-      post.status <- "Ia"
-      next.time <- t.asymp()
-    } else {
-      sevsymp <- p.sevsymp(age = age)
-      if(sevsymp == 1){
-        post.status <- "Ims"
-        next.time <- t.mtosev()
-      } else {
-        post.status <- "Im"
-        next.time <- t.msymp()
-      }
-    }
-  } else if (pre.status == "Ia"){
-    post.status <- "R"
-    next.time <- NA_real_
-  } else if (pre.status == "Ims"){
-    post.status <- "Is"
-    next.time <- t.sevsymp()
-  } else if (pre.status == "Im"){
-    post.status <- "R"
-    next.time <- NA_real_
-  } else if (pre.status == "Is"){
-    post.status <- "R"
-    next.time <- NA_real_
-  }
-  return(c(post.status, next.time))
-}
-
-#Function to make matrix symmetrical
-sym.mat <- function(mat){
-  mat[lower.tri(mat)] = t(mat)[lower.tri(mat)]
-  return(mat)
-}
+setwd("CMH/ABM/")
+devtools::load_all()
 
 # Function to generate random edges on top of network
 #TODO: introduce heterogeneity into who generates random edges
@@ -69,33 +28,6 @@ add.r.edges <- function(start.net, r.rate, r.trans.rate){
   return(new.net)
 }
 
-# Function to get degree for contact network
-get.degree <- function(net.mat){
-  net.mat[which(net.mat>0)] <- 1
-  rowSums(net.mat)
-}
-
-#Function to generate new infections given contact matrix and indices of people who are infectious
-# Restricts the contact matrix (`contact.mat`) to include only those columns corresponding to infectious people based on `inf.ind`
-# Then goes through each row and performs a bernoulli trial based on the transmission probability in each cell
-# Equivalent to a chance of infection for every contact if contact exists (else the cell is 0)
-# Returns a vector of row indicies corresponding to new infections to enter the E compartment
-# Infection multiplier allows alteration of the infection probability, e.g. if contacts are with asymptomatics and want to model reduced infectiousness
-new.infection <- function(contact.mat, inf.ind, inf.multiplier){
-  #drop=F allows apply to proceed even if length(inf.ind=1) since apply expects a matrix 
-  init.Es <- t(apply(contact.mat[,inf.ind,drop=F], 1, function(e){ 
-    sapply(e, function(beta) rbinom(1, 1, (1-exp(-beta*inf.multiplier)))) 
-  }))
-  # Make sure summing over rows since if inf.ind=1, above returns a 1xN matrix rather than Nx1 rows
-  if(dim(init.Es)[1] == 1){
-    new.Es <- colSums(init.Es)
-  } else {
-    new.Es <- rowSums(init.Es)
-  }
-                   
-  return(new.Es)
-}
-
 # ---------------------------------------------------------
 # SETUP
 # TODO: incorporate testing frequency/testing regime
@@ -103,7 +35,7 @@ new.infection <- function(contact.mat, inf.ind, inf.multiplier){
 
 # Number of people, time frame, and time step
   N <- 1000
-  t.tot <- 200
+  t.tot <- 100
   dt <- 1
   
 # Intervention parameters 
@@ -125,12 +57,13 @@ new.infection <- function(contact.mat, inf.ind, inf.multiplier){
   ip.seed <- 0    #infected pre-symptomatic
   ia.seed <- 0    #infected asymptomatic
   im.seed <- 0    #infected mildly symptomatic
-  ims.seed <- 0   #infected mildly symptomatic, will become severe
-  is.seed <- 0    #infected severely symptomatic
+  imh.seed <- 0   #infected mildly symptomatic, will become severe
+  ih.seed <- 0    #infected severely symptomatic
+  d.seed <- 0
   r.seed <- 0     #removed
-  s.seed <- N - e.seed - ip.seed - ia.seed - im.seed - ims.seed - is.seed - r.seed
+  s.seed <- N - e.seed - ip.seed - ia.seed - im.seed - imh.seed - ih.seed - d.seed - r.seed
   
-# Testing frequency and timing  
+#TODO: Testing frequency and timing  
   
 # Parameters and distributions 
   # Transmission probabilities across different edges
@@ -147,30 +80,30 @@ new.infection <- function(contact.mat, inf.ind, inf.multiplier){
     # Presymptomatic period (basically incubation period-latent period, this could maybe use some work)
       t.presymp <- function(...) {rgamma(1, 1, 2)} # erlang distribution with mean 0.5 days
       
-    # Probability of being asymptomatic vs. becoming mildly symptomatic
-      p.asymp <- function(age) {dplyr::case_when(age %in% c(0:9) ~ 0.03,
-                                                 age %in% c(10:19) ~ 0.05,
-                                                 age %in% c(20:29) ~ 0.3,
-                                                 age %in% c(30:39) ~ 0.55,
-                                                 age %in% c(40:49) ~ 0.61,
-                                                 age %in% c(50:59) ~ 0.75,
-                                                 age %in% c(60:69) ~ 0.89,
-                                                 age %in% c(70:79) ~ 0.9,
-                                                 age >= 80 ~ 0.9)}
+    # Probability of becoming mildly symptomatic vs. being asymptomatic
+      p.symp <- function(age) {dplyr::case_when(age %in% c(0:9) ~ 0.03,
+                                                age %in% c(10:19) ~ 0.05,
+                                                age %in% c(20:29) ~ 0.3,
+                                                age %in% c(30:39) ~ 0.55,
+                                                age %in% c(40:49) ~ 0.61,
+                                                age %in% c(50:59) ~ 0.75,
+                                                age %in% c(60:69) ~ 0.89,
+                                                age %in% c(70:79) ~ 0.9,
+                                                age >= 80 ~ 0.9)}
       
     # Time spent asymptomatic before recovery 
       t.asymp <- function(...) {rgamma(1, 6, 1)} # erlang distribution with mean 6 days, longish tail
       
     # Probability of progressing from mildly to severely symptomatic
       p.sevsymp <- function(age) {dplyr::case_when(age %in% c(0:9) ~ 0.004,
-                                                 age %in% c(10:19) ~ 0.004,
-                                                 age %in% c(20:29) ~ 0.01,
-                                                 age %in% c(30:39) ~ 0.04,
-                                                 age %in% c(40:49) ~ 0.09,
-                                                 age %in% c(50:59) ~ 0.13,
-                                                 age %in% c(60:69) ~ 0.19,
-                                                 age %in% c(70:79) ~ 0.2,
-                                                 age >= 80 ~ 0.25)}
+                                                   age %in% c(10:19) ~ 0.004,
+                                                   age %in% c(20:29) ~ 0.01,
+                                                   age %in% c(30:39) ~ 0.04,
+                                                   age %in% c(40:49) ~ 0.09,
+                                                   age %in% c(50:59) ~ 0.13,
+                                                   age %in% c(60:69) ~ 0.19,
+                                                   age %in% c(70:79) ~ 0.2,
+                                                   age >= 80 ~ 0.25)}
       
     # Time spent mildly symptomatic before recovery if B(1, p.sevsymp)=1
       t.msymp <- function(...) {rexp(1, 1/9)}
@@ -178,8 +111,19 @@ new.infection <- function(contact.mat, inf.ind, inf.multiplier){
     # Time spent mildly symptomatic before progressing to severely symptomatic if B(1, p.sevsymp)=1
       t.mtosev <- function(...) {rgamma(1, 7, 2)}
       
-    # Time spent severely symptomatic before recovery
-      t.sevsymp <- function(...) {rgamma(1, 40, 4)} # erlang distribution with mean 10 days, low variance
+    # Time spent severely symptomatic before recovery/death
+      t.sevsymp <- function(...) {rgamma(1, 36, 3)} # erlang distribution with mean 12 days, low variance
+      
+    # Probability of dying given hospitalization from https://www.bmj.com/content/369/bmj.m1923 Fig 4 mean of sex-stratified 
+      p.mort <- function(age) {dplyr::case_when(age %in% c(0:9) ~ 0.01,
+                                                age %in% c(10:19) ~ 0.0205,
+                                                age %in% c(20:29) ~ 0.031,
+                                                age %in% c(30:39) ~ 0.0475,
+                                                age %in% c(40:49) ~ 0.0785,
+                                                age %in% c(50:59) ~ 0.12,
+                                                age %in% c(60:69) ~ 0.186,
+                                                age %in% c(70:79) ~ 0.3,
+                                                age >= 80 ~ 0.45)}
         
 # Base network matrix and Network matrix through time
   base.net <- matrix(data = 0, ncol = N, nrow = N)
@@ -194,6 +138,7 @@ new.infection <- function(contact.mat, inf.ind, inf.multiplier){
 # ---------------------------------------------------------  
   
 # NETWORK CHARACTERISTICS (code adapted from http://epirecip.es/epicookbook/chapters/karlsson/r) 
+  
 #TODO: FIll THESE IN WITH EMPIRICAL/SITUATIONAL DATA  
 #TODO: How to inform formation of random edges within network? e.g. heterogeneity between individuals in terms of their random contacts
   
@@ -205,8 +150,8 @@ new.infection <- function(contact.mat, inf.ind, inf.multiplier){
   pop.ages <- as.numeric(sample(names(pop.props), size = N, replace = TRUE, prob = pop.props))
 
 # example family size proportions
-  num.siblings.props <- c(0.19,0.48,0.23,0.10)
-  names(num.siblings.props) <- c(0,1,2,3)
+  num.siblings.props <- dnbinom(0:10, mu = 1.2, size = 1000)
+  names(num.siblings.props) <- c(0:10)
 
 # School characteristics 
   average.class.size.school <- 20
@@ -228,7 +173,7 @@ new.infection <- function(contact.mat, inf.ind, inf.multiplier){
     child.index <- which((pop.ages<20) & is.na(family.membership))[1:n.children]
     
   # Find unassigned parents to assign children to
-# NOTE: This ends up being a bit weird because can have parents who are 19 and children who are 18  
+# NOTE: This ends up being a bit weird because can have parents who are 20-29 and children who are 10-19  
     
     parent.index <- which((pop.ages>=20) & (pop.ages<=70) & is.na(family.membership))[1:2]
   # Assign family id to children and parents
@@ -319,8 +264,8 @@ init.infection <- sample(c(rep("E", e.seed),
                            rep("Ip", ip.seed),
                            rep("Ia", ia.seed),
                            rep("Im", im.seed),
-                           rep("Ims", ims.seed),
-                           rep("Is", is.seed),
+                           rep("Imh", imh.seed),
+                           rep("Ih", ih.seed),
                            rep("R", r.seed),
                            rep("S", s.seed)), N, replace = FALSE)
   
@@ -331,8 +276,8 @@ init.infection <- sample(c(rep("E", e.seed),
                      i == "Ip" ~ t.presymp(), 
                      i == "Ia" ~ t.asymp(), 
                      i == "Im" ~ t.msymp(), 
-                     i == "Ims" ~ t.mtosev(), 
-                     i == "Is" ~ t.sevsymp(), 
+                     i == "Imh" ~ t.mtosev(), 
+                     i == "Ih" ~ t.sevsymp(), 
                      TRUE ~ NA_real_)
   })
 
@@ -365,6 +310,10 @@ for(t in 2:(t.tot/dt)){
 # Update network based on epi advances and interventions
 # TODO: Implement infection influence on contact    
   t.net <- base.net  
+  
+  #indices of individuals with symptoms
+  inf.w.symptoms <- which(inf.mat[,t] %in% c("Im", "Imh"))
+  
   # Eliminate school connections if schools closed and increase hh contacts
     if(t.sc <= (t*dt) & (t*dt) <= t.sc.end){
       t.net[which(t.net == "H")] <- trans.hh*trans.hh.sc
@@ -397,7 +346,7 @@ for(t in 2:(t.tot/dt)){
 #Generate new infections across network 
   # Indices of different types of transmitters transmitters
     a.p.transmitters <- which(inf.mat[,t] %in% c("Ip", "Ia"))  
-    m.s.transmitters <- which(inf.mat[,t] %in% c("Im", "Is"))  
+    m.s.transmitters <- which(inf.mat[,t] %in% c("Im", "Imh"))  
    
   # Bernouli trial across all rows times transmitter columns where p(infection)~contact
     # Transmission from pre/asymtpomatic infections with reduction in transmissibility 
@@ -429,4 +378,5 @@ for(t in 2:(t.tot/dt)){
       
   # On to the next one  
 }
-    
+ 
+test <- sum.inf.mat(inf.mat)       
