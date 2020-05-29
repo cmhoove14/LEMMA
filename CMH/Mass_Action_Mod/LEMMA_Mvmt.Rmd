@@ -1,12 +1,14 @@
 ---
-title: "Movement Forced COVID Model"
+title: "LEMMA_Mvmt_Force"
 author: "Chris Hoover"
-date: "5/27/2020"
+date: "5/28/2020"
 output: pdf_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(echo = FALSE,
+                      fig.height = 6, 
+                      fig.width = 8)
 
 require(deSolve)
 require(ggplot2)
@@ -21,12 +23,12 @@ Use movement data incorporated into a dynamic model of COVID transmission via a 
 # Movement Data  
 ## Descartes Labs  
 Technical report [here](https://arxiv.org/pdf/2003.14228.pdf). Data represents "the median of the max-distance mobility for all samples in the specified region" derived from anonymized mobile phone data.
-```{r descartes}
+```{r descartes, fig.align='left'}
 descartes <- read.csv(url("https://raw.githubusercontent.com/descarteslabs/DL-COVID-19/master/DL-us-mobility-daterow.csv"))
 
 descartes_sf <- descartes %>% 
   filter(admin1 == "California" & admin2 == "San Francisco County") %>% 
-  mutate(rel_m = m50/)
+  mutate(rel_m = m50/max(m50))
 
 t0 <- as.Date("2020-02-16")
 t.end <- as.Date(descartes_sf$date[nrow(descartes_sf)])
@@ -43,7 +45,7 @@ descartes_sf %>%
           axis.text.x = element_text(angle = 45,
                                      hjust = 1)) +
     labs(x = "Date",
-         y = "Movement",
+         y = "Relative Movement Index",
          title = "Descartes Movement for San Francisco County")
 ```
 
@@ -93,70 +95,82 @@ sf_all <- sf_test %>%
   full_join(sf_hosp, by = "Date")
 ```
 
-
-# Model  
-```{r mod_eqns}
-covid_odes = function(t, n, p) { 
-
-  # States
-    S = n[1]
-    E = n[2]
-    Ip = n[3]
-    Ia = n[4]
-    Is = n[5]
-    Im = n[6]
-    Ih = n[7]
-    H = n[8]
-    D = n[9]
-    R = n[10]
+```{r case_plot}
+case_plot <- sf_case %>% 
+  ggplot() +
+    geom_point(aes(x = Date, y = cum_case),
+               pch = 16, col = "coral") +
+    theme_bw() +
+    scale_x_date(date_labels = "%m/%d", 
+               date_breaks = "7 day") +
+    theme(axis.title = element_text(size = 14,
+                                    face = "bold"),
+          axis.text = element_text(size = 12),
+          axis.text.x = element_text(angle = 45,
+                                     hjust = 1)) +
+    labs(x = "Date",
+         y = "Cumulative cases",
+         title = "Confirmed Cases in San Francisco County")
   
-  # Parameters
-    N = exp(p[['N']])             #population size
-    beta = exp(p[['beta']])       #transmission rate
-    cp = exp(p[['cp']])           #Relative contact rate between S and Ip
-    ca = exp(p[['ca']])           #Relative contact rate between S and Ia
-    cm = exp(p[['cm']])           #Relative contact rate between S and Im
-    cs = exp(p[['cs']])           #Relative contact rate between S and Is
-    sigma = exp(p[['sigma']])     #1/serial interval
-    alpha = exp(p[['alpha']])     #proportion asymptomatic
-    lambda = exp(p[['lambda']])   #1/(incubation period-serial interval) to model pre-symptomatic transmission
-    rho = exp(p[['rho']])         #Proportion symptomatic requiring hospitalization
-    delta_1 = exp(p[['delta_1']]) #convenience parameter: 1/(delta1 + delta2) = time between symptom onset and hospitalization
-    delta_2 = exp(p[['delta_2']]) #1/(delta1 + delta2) = time between symptom onset and hospitalization
-    gam_a = exp(p[['gam_a']])     #1/time to recovery (non-infectiousness) for asymptomatics
-    gam_m = exp(p[['gam_m']])     #1/time to recovery for mild cases
-    gam_h = exp(p[['gam_h']])     #1/time to removed (recovered or deceased) for hospitalized
-    mu = exp(p[['mu']])           #proportion of hospitalized cases who die
+case_plot
 
-  #Movement forcing function
-    m = descartes_force(t)
-  
-  # Model equations
-    dSdt = -S*beta*m*(Ip*cp+Ia*ca+Im*cm+Is*cs)/N
-    
-    dEdt = S*beta*m*(Ip*cp+Ia*ca+Im*cm+Is*cs)/N - E*sigma
-    
-    dIpdt = E*sigma - Ip*(alpha*lambda+(1-alpha)*lambda)
-    
-    dIadt = Ip*alpha*lambda - Ia*gam_a
-    
-    dIsdt = Ip*(1-alpha)*lambda - Is*(rho*delta_1+(1-rho)*delta_1)
-    
-    dImdt = Is*(1-rho)*delta_1 - Im*gam_m
-
-    dIhdt = Is*rho*delta_1 - Ih*delta_2
-
-    dHdt = Ih*delta_2 - H*(mu*gam_h + (1-mu)*gam_h)
-    
-    dDdt = H*mu*gam_h
-    
-    dRdt = Ia*gam_a+Im*gam_m+H*(1-mu)*gam_h
-
-    return(list(c(dSdt, dEdt, dIpdt, dIadt, dIsdt, dImdt, dIhdt, dHdt, dDdt, dRdt)))
-    
-} 
 ```
 
+```{r hosp_plot}
+# Case and hosptialization data for SF
+hosp_plot <- sf_hosp %>% 
+  ggplot() +
+    geom_point(aes(x = Date, y = HOSP_tot),
+               pch = 17, col = "darkblue") +
+    theme_bw() +
+    scale_x_date(date_labels = "%m/%d", 
+               date_breaks = "7 day") +
+    theme(axis.title = element_text(size = 14,
+                                    face = "bold"),
+          axis.text = element_text(size = 12),
+          axis.text.x = element_text(angle = 45,
+                                     hjust = 1)) +
+    labs(x = "Date",
+         y = "Total hospitalizations",
+         title = "Hospitalizations in San Francisco County")
+
+hosp_plot
+```
+
+```{r mort_plot}
+mort_plot <- sf_case %>% 
+  ggplot() +
+    geom_point(aes(x = Date, y = cum_death),
+               pch = 18, col = "darkred") +
+    theme_bw() +
+    scale_x_date(date_labels = "%m/%d", 
+               date_breaks = "7 day") +
+    theme(axis.title = element_text(size = 14,
+                                    face = "bold"),
+          axis.text = element_text(size = 12),
+          axis.text.x = element_text(angle = 45,
+                                     hjust = 1)) +
+    labs(x = "Date",
+         y = "Cumulative deaths",
+         title = "COVID Deaths in San Francisco County")
+
+mort_plot
+
+```
+
+
+# Model  
+We use a slight tweak to LEMMA to add an explicit deaths compartment in order to fit to deaths data in addition to hospitalizations  
+
+\begin{align*}
+\dot{S}&=-\beta S(I_R+I_H)/N \\
+\dot{E}&=\beta S(I_R+I_H)/N-\sigma E \\
+\dot{I_R}&=\sigma(1-\alpha) E-\gamma_R I_R \\
+\dot{I_H}&=\sigma\alpha E-\rho I_H \\
+\dot{H}&=\rho I_H-\gamma_H H \\
+\dot{D}&=\gamma_H\mu H \\
+\dot{R}&=\gamma_R I_R \gamma_H(1-\mu)H\\
+\end{align*}
 
 ```{r mod_prep}
 #source("COVID_ODE.R")
@@ -166,61 +180,50 @@ t.sim <- as.numeric(t.end - t0)
 
 # Was having trouble fitting model with t0 as march 1st, not enough time for infection to build up before movement tanks, so adding some time to ramp up
 
+set.seed(430)
 t.pad <- as.numeric(t.sim - (t.end - as.Date(descartes_sf$date[1])))
-m.pad <- mean(descartes_sf$m50[1:10]) + rnorm(t.pad)
+m.pad <- mean(descartes_sf$m50[1:10]) + rnorm(t.pad, 0, 0.5)
 
 descartes_force <- approxfun(as.data.frame(list(times = 1:t.sim,
                                                 move = c(m.pad, descartes_sf$m50))),
                              rule = 2)
 
 #Starting covid parameters
-covid_pars <- list(N = pop.size,
+lemma_pars <- list(N = pop.size,
                    t.sim = t.sim,
                    E.start = 2,
                    beta = 0.1,
-                   cp = 1,
-                   ca = 0.5,
-                   cm = 0.5,
-                   cs = 0.2,
+                   cr = 1,
+                   ch = 1,
                    sigma = 1/4,
-                   alpha = 0.4,
-                   lambda = 1,
-                   rho = 0.2,
-                   delta_1 = 1/1.2,
-                   delta_2 = 1/3,
-                   gam_a = 1/5,
-                   gam_m = 1/4,
+                   alpha = 0.05,
+                   rho = 1/4,
+                   gam_r = 1/5,
                    gam_h = 1/12,
-                   mu = 0.05)
+                   mu = 0.2)
 
-covid_pars <- as.list(log(unlist(covid_pars)))
+lemma_pars <- as.list(log(unlist(lemma_pars)))
 
 ```
 
-```{r par_table, echo = FALSE, include = TRUE, dev="tikz" }
-tab1 <- data.frame(val = as.character(round(exp(as.numeric(covid_pars)), 3)), 
+```{r par_table, dev="tikz" }
+tab1 <- data.frame(val = as.character(round(exp(as.numeric(lemma_pars)), 3)), 
                    des = c("population size",
                            "time to run simulation",
                            "starting number of exposed",
                            "transmission rate",
-                           "Relative contact rate between S and Ip",
-                           "Relative contact rate between S and Ia",
-                           "Relative contact rate between S and Im",
-                           "Relative contact rate between S and Is",
+                           "Relative contact rate between S and Ir",
+                           "Relative contact rate between S and Ih",
                            "1/serial interval",
-                           "proportion asymptomatic",
-                           "1/(incubation period-serial interval) to model pre-symptomatic transmission",
-                           "Proportion symptomatic requiring hospitalization",
-                           "convenience parameter: 1/(delta1 + delta2) = time between symptom onset and hospitalization",
-                           "1/(delta1 + delta2) = time between symptom onset and hospitalization",
-                           "1/time to recovery (non-infectiousness) for asymptomatics",
-                           "1/time to recovery for mild cases",
-                           "1/time to removed (recovered or deceased) for hospitalized",
+                           "proportion severely symptomatic (will be hospitalized)",
+                           "time between symptom onset and hospitalization",
+                           "1/time to recovery (non-infectiousness) for mildly symptomatic",
+                           "1/time hospitalized",
                            "proportion of hospitalized cases who die"))
 
-rownames(tab1) <- c("$N$", "t.sim", "$E_0$",  "$\\beta$","$c_p$","$c_a$","$c_m$", "$c_s$",
-                    "$\\sigma$","$\\alpha$", "$\\lambda$", "$\\rho$", "$\\delta_1$", "$\\delta_2$",
-                    "$\\gamma_a$","$\\gamma_m$","$\\gamma_h$","$\\mu$")
+rownames(tab1) <- c("$N$", "t.sim", "$E_0$",  "$\\beta$","$c_r$","$c_h$",
+                    "$\\sigma$","$\\alpha$", "$\\rho$", 
+                    "$\\gamma_r$","$\\gamma_h$","$\\mu$")
 
 knitr::kable(tab1, row.names = TRUE, 
              col.names = c("Value", "Definition"), 
@@ -228,9 +231,56 @@ knitr::kable(tab1, row.names = TRUE,
              caption = "Parameter values and descriptions used in the model")
 ```
 
-```{r mod_fit}
+```{r mod_odes}
+lemma_odes = function(t, n, p) { 
+
+  # States
+    S = n[1]
+    E = n[2]
+    Ir = n[3]
+    Ih = n[4]
+    H = n[5]
+    D = n[6]
+    R = n[7]
+  
+  # Parameters
+    N = exp(p[['N']])             #population size
+    beta = exp(p[['beta']])       #transmission rate
+    cr = exp(p[['cr']])           #Relative contact rate between S and Ir
+    ch = exp(p[['ch']])           #Relative contact rate between S and Ih
+    sigma = exp(p[['sigma']])     #1/serial interval
+    alpha = exp(p[['alpha']])     #proportion severely symptomatic
+    rho = exp(p[['rho']])         #1/time between symptom onset and hospitalization
+    gam_r = exp(p[['gam_r']])     #1/time to recovery (non-infectiousness) for mild/asymptomatic
+    gam_h = exp(p[['gam_h']])     #1/time to removed (recovered or deceased) for hospitalized
+    mu = exp(p[['mu']])           #proportion of hospitalized cases who die
+
+  #Movement forcing function
+    m = descartes_force(t)
+  
+  # Model equations
+    dSdt = -S*beta*m*(Ir*cr+Ih*ch)/N
+    
+    dEdt = S*beta*m*(Ir*cr+Ih*ch)/N - E*sigma
+    
+    dIrdt = E*(1-alpha)*sigma - Ir*gam_r
+    
+    dIhdt = E*alpha*sigma - Ih*rho
+
+    dHdt = Ih*rho - H*gam_h
+    
+    dDdt = H*mu*gam_h
+    
+    dRdt = Ir*gam_r+Ih*gam_h*(1-mu)
+
+    return(list(c(dSdt, dEdt, dIrdt, dIhdt, dHdt, dDdt, dRdt)))
+    
+} 
+```
+
+```{r point_fit}
 #Function to return "fit" from input parameters and data
-  covid_ods_fit <- function(fit.pars, all.pars, fit_data) {
+  lemma_fit <- function(fit.pars, all.pars, fit_data) {
     use.pars <- all.pars
     par.fit.index <- which(names(all.pars) %in% names(fit.pars))
     
@@ -241,17 +291,14 @@ knitr::kable(tab1, row.names = TRUE,
     # initial number of exposed as parameter
     init <- c(S = exp(use.pars[["N"]]) - exp(use.pars[["E.start"]]),
               E = exp(use.pars[["E.start"]]),
-              Ip = 0,
-              Ia = 0,
-              Is = 0,
-              Im = 0,
+              Ir = 0,
               Ih = 0,
               H = 0,
               D = 0,
               R = 0)
     
     # Run the model with input parameters to generate predicted quantities
-    mod.run <- as.data.frame(ode(init, 1:exp(use.pars[["t.sim"]]), covid_odes, use.pars)) %>% 
+    mod.run <- as.data.frame(ode(init, 1:exp(use.pars[["t.sim"]]), lemma_odes, use.pars)) %>% 
       mutate(Date = as.Date(t0+(time-1)))
     
     # Join simulated and observed data
@@ -259,27 +306,26 @@ knitr::kable(tab1, row.names = TRUE,
       full_join(fit_data, by = "Date")
     
     ## Calculate the log likelihood (logLike) of the data given theta (parameter set)
-  	hosp.llik <- dnorm(mod.obs.dat$H, mod.obs.dat$HOSP_CONF, mod.obs.dat$HOSP_CONF/10, log = T)
-  	mort.llik <- dnorm(mod.obs.dat$D, mod.obs.dat$cum_death, mod.obs.dat$HOSP_CONF/10, log = T)
+  	hosp.llik <- dnorm(mod.obs.dat$H, mod.obs.dat$HOSP_CONF, 2, log = T)
+  	mort.llik <- dnorm(mod.obs.dat$D, mod.obs.dat$cum_death, 1, log = T)
 
-    post.llik <- -sum(hosp.llik, na.rm = T) + sum(mort.llik, na.rm = T)
+    post.llik <- sum(hosp.llik, mort.llik, na.rm = T)
+    
+    #print(c(use.pars[["E.start"]], use.pars[["beta"]], post.llik))
     
   	return(post.llik)
   }
 
-```
-
-```{r covid_grid, eval=FALSE, include = FALSE}
-covid_sweeps <- expand.grid(E.start = log(c(1:100)),
+lemma_sweeps <- expand.grid(E.start = log(c(1:10)),
                             beta = log(seq(1e-3, 0.5, by = 5e-3)))
 
 require(parallel)
 opclust <- makeCluster(detectCores()-1)         # Make cluster
-clusterExport(opclust, c("covid_sweeps",
-                         "covid_pars", 
-                         "covid_ods_fit",
+clusterExport(opclust, c("lemma_sweeps",
+                         "lemma_pars", 
+                         "lemma_fit",
                          "sf_all",
-                         "covid_odes",
+                         "lemma_odes",
                          "descartes_force",
                          "t0"))         # Export objects to cluster
 
@@ -288,27 +334,23 @@ clusterEvalQ(opclust, {
   library(tidyverse)
 })
 
-covid_fits <- parApply(opclust, covid_sweeps, 1, function(x){
-  covid_ods_fit(as.list(x), covid_pars, sf_all)
+lemma_fits <- parApply(opclust, lemma_sweeps, 1, function(x){
+  lemma_fit(as.list(x), lemma_pars, sf_all)
 })
 
 stopCluster(opclust)
 
-covid_rslts <- cbind(covid_sweeps, covid_fits)
-
+lemma_rslts <- cbind(lemma_sweeps, lemma_fits)
 ```
 
-```{r covid_plot}
-best.pars <- covid_pars
-best.pars[["beta"]] <- -7#covid_rslts$beta[which(covid_fits == min(covid_fits))]
-best.pars[["E.start"]] <- 8#covid_rslts$E.start[which(covid_fits == min(covid_fits))]
+```{r point_fit_plot}
+best.pars <- lemma_pars
+best.pars[["beta"]] <- lemma_rslts$beta[which(lemma_fits == max(lemma_fits))]
+best.pars[["E.start"]] <- lemma_rslts$E.start[which(lemma_fits == max(lemma_fits))]
 
   init <- c(S = exp(best.pars[["N"]]) - exp(best.pars[["E.start"]]),
             E = exp(best.pars[["E.start"]]),
-            Ip = 0,
-            Ia = 0,
-            Is = 0,
-            Im = 0,
+            Ir = 0,
             Ih = 0,
             H = 0,
             D = 0,
@@ -317,7 +359,7 @@ best.pars[["E.start"]] <- 8#covid_rslts$E.start[which(covid_fits == min(covid_fi
 
 best.sim <- as.data.frame(ode(init, 
                               1:exp(best.pars[["t.sim"]]), 
-                              covid_odes, 
+                              lemma_odes, 
                               best.pars)) %>% 
   mutate(Date = as.Date(t0+time)) 
 
@@ -353,25 +395,99 @@ ggplot() +
   scale_x_date(date_labels = "%m/%d", 
                date_breaks = "7 day")
   
+
 ```
 
-```{r mcmcmMH_fx}
+## TODO: Two populations  
+* How to divide movement/contact between the two populations?  
+
+```{r odes_2pop}
+lemma_2pop_odes = function(t, n, p) { 
+
+  # States
+    S = n[1]
+    E = n[2]
+    Ir = n[3]
+    Ih = n[4]
+    H = n[5]
+    D = n[6]
+    R = n[7]
+ 
+    S = n[8]
+    E = n[9]
+    Ir = n[10]
+    Ih = n[11]
+    H = n[12]
+    D = n[13]
+    R = n[14]
+ 
+  # Parameters
+    N = exp(p[['N']])             #population size
+    beta = exp(p[['beta']])       #transmission rate
+    cr = exp(p[['cr']])           #Relative contact rate between S and Ir
+    ch = exp(p[['ch']])           #Relative contact rate between S and Ih
+    sigma = exp(p[['sigma']])     #1/serial interval
+    alpha = exp(p[['alpha']])     #proportion severely symptomatic
+    rho = exp(p[['rho']])         #1/time between symptom onset and hospitalization
+    gam_r = exp(p[['gam_r']])     #1/time to recovery (non-infectiousness) for mild/asymptomatic
+    gam_h = exp(p[['gam_h']])     #1/time to removed (recovered or deceased) for hospitalized
+    mu = exp(p[['mu']])           #proportion of hospitalized cases who die
+
+  #Movement forcing function
+    m = descartes_force(t)
+  
+  # Model equations pop 1
+    dS1dt = -S*beta*m*(Ir*cr+Ih*ch)/N
+    
+    dE1dt = S*beta*m*(Ir*cr+Ih*ch)/N - E*sigma
+    
+    dIr1dt = E*(1-alpha)*sigma - Ir*gam_r
+    
+    dIh1dt = E*alpha*sigma - Ih*rho
+
+    dH1dt = Ih*rho - H*gam_h
+    
+    dD1dt = H*mu*gam_h
+    
+    dR1dt = Ir*gam_r+Ih*gam_h*(1-mu)
+
+  # Model equations pop 2
+    dS2dt = -S*beta*m*(Ir*cr+Ih*ch)/N
+    
+    dE2dt = S*beta*m*(Ir*cr+Ih*ch)/N - E*sigma
+    
+    dIr2dt = E*(1-alpha)*sigma - Ir*gam_r
+    
+    dIh2dt = E*alpha*sigma - Ih*rho
+
+    dH2dt = Ih*rho - H*gam_h
+    
+    dD2dt = H*mu*gam_h
+    
+    dR2dt = Ir*gam_r+Ih*gam_h*(1-mu)
+    
+    
+    return(list(c(dS1dt, dE1dt, dIr1dt, dIh1dt, dH1dt, dD1dt, dR1dt,
+                  dS2dt, dE2dt, dIr2dt, dIh2dt, dH2dt, dD2dt, dR2dt)))
+    
+} 
+```
+
+
+```{r mcmcMH_setup}
 #Function to return "fit" from input parameters and data
-  covid_mcmc_fit <- function(theta.pars, fit_data) {
+  lemma_mcmc_fit <- function(theta.pars, fit_data) {
     # initial number of exposed as parameter
     init <- c(S = exp(theta.pars[["N"]]) - exp(theta.pars[["E.start"]]),
               E = exp(theta.pars[["E.start"]]),
-              Ip = 0,
-              Ia = 0,
-              Is = 0,
-              Im = 0,
+              Ir = 0,
               Ih = 0,
               H = 0,
               D = 0,
               R = 0)
     
     # Run the model with input parameters to generate predicted quantities
-    mod.run <- as.data.frame(ode(init, 1:exp(theta.pars[["t.sim"]]), covid_odes, theta.pars)) %>% 
+    mod.run <- as.data.frame(ode(init, 1:exp(theta.pars[["t.sim"]]), lemma_odes, theta.pars)) %>% 
       mutate(Date = as.Date(t0+(time-1)))
     
     # Join simulated and observed data
@@ -379,33 +495,28 @@ ggplot() +
       full_join(fit_data, by = "Date")
     
     ## Calculate the log likelihood (logLike) of the data given theta (parameter set)
-  	hosp.llik <- dnorm(mod.obs.dat$H, mod.obs.dat$HOSP_CONF, mod.obs.dat$HOSP_CONF/10, log = T)
-  	mort.llik <- dnorm(mod.obs.dat$D, mod.obs.dat$cum_death, mod.obs.dat$HOSP_CONF/10, log = T)
+  	hosp.llik <- dnorm(mod.obs.dat$H, mod.obs.dat$HOSP_CONF, 8, log = T)
+  	mort.llik <- dnorm(mod.obs.dat$D, mod.obs.dat$cum_death, 4, log = T)
 
     post.llik <- sum(hosp.llik, na.rm = T) + sum(mort.llik, na.rm = T)
     
   	return(post.llik)
   }
 
-#St.devs of covid parameters
-covid_sds <- list(N = 0,
+#St.devs of lemma parameters
+
+lemma_sds <- list(N = 0,
                   t.sim = 0,
-                  E.start = 1,
+                  E.start = 2,
                   beta = 0.3,
-                  cp = 0,
-                  ca = 0,
-                  cm = 0,
-                  cs = 0,
-                  sigma = 1/4,
-                  alpha = 0.2,
-                  lambda = 1,
-                  rho = 0.1,
-                  delta_1 = 0,
-                  delta_2 = 1/3,
-                  gam_a = 1/3,
-                  gam_m = 1/2,
-                  gam_h = 1/6,
-                  mu = 0)
+                  cr = 0,
+                  ch = 0,
+                  sigma = 0,#1/4,
+                  alpha = 0.1,
+                  rho = 0,#1/4,
+                  gam_r = 0,#1/5,
+                  gam_h = 0,#1/6,
+                  mu = 0.05)
 
 
 ## Metropolis-Hastings algorithm for searching parameter space (arbitrary
@@ -496,95 +607,17 @@ mcmcMH <- function(posterior, fitData, initTheta, proposalSD, numIterations) {
 
 ```
 
-```{r covid_odes_mcmcm_fit}
-covid_trace1 <- mcmcMH(posterior = covid_mcmc_fit,
+```{r mcmcMH_fit}
+lemma_fit1 <- mcmcMH(posterior = lemma_mcmc_fit,
                        fitData = sf_all,
-                       initTheta = covid_pars,
-                       proposalSD = covid_sds,
-                       10000)
+                       initTheta = lemma_pars,
+                       proposalSD = lemma_sds,
+                       1000)
 
 # Use the package "coda" to convert the trace into this format:
-  trace <- coda::mcmc(exp(covid_trace1[-1,which(unlist(covid_sds) != 0)]))
-  colnames(trace) <- names(covid_sds)[which(unlist(covid_sds) != 0)]
-  plot(coda::mcmc(trace[5000:10000,]))
-  summary(trace[5000:10000,])
+  trace <- coda::mcmc(exp(lemma_fit1[-1,which(unlist(lemma_sds) != 0)]))
+  colnames(trace) <- names(lemma_sds)[which(unlist(lemma_sds) != 0)]
+  plot(coda::mcmc(trace))
+  summary(trace)
 
 ```
-
-# Two population model  
-```{r}
-covid_odes2 = function(t, n, p) { 
-
-  # States
-    S = n[1]
-    E = n[2]
-    Ip = n[3]
-    Ia = n[4]
-    Is = n[5]
-    Im = n[6]
-    Ih = n[7]
-    H = n[8]
-    D = n[9]
-    R = n[10]
-
-    S2 = n[11]
-    E2 = n[12]
-    Ip2 = n[13]
-    Ia2 = n[14]
-    Is2 = n[15]
-    Im2 = n[16]
-    Ih2 = n[17]
-    H2 = n[18]
-    D2 = n[19]
-    R2 = n[20]
-  
-  # Parameters
-    N = exp(p[['N']])             #population size
-    beta = exp(p[['beta']])       #transmission rate
-    cp = exp(p[['cp']])           #Relative contact rate between S and Ip
-    ca = exp(p[['ca']])           #Relative contact rate between S and Ia
-    cm = exp(p[['cm']])           #Relative contact rate between S and Im
-    cs = exp(p[['cs']])           #Relative contact rate between S and Is
-    sigma = exp(p[['sigma']])     #1/serial interval
-    alpha = exp(p[['alpha']])     #proportion asymptomatic
-    lambda = exp(p[['lambda']])   #1/(incubation period-serial interval) to model pre-symptomatic transmission
-    rho = exp(p[['rho']])         #Proportion symptomatic requiring hospitalization
-    delta_1 = exp(p[['delta_1']]) #convenience parameter: 1/(delta1 + delta2) = time between symptom onset and hospitalization
-    delta_2 = exp(p[['delta_2']]) #1/(delta1 + delta2) = time between symptom onset and hospitalization
-    gam_a = exp(p[['gam_a']])     #1/time to recovery (non-infectiousness) for asymptomatics
-    gam_m = exp(p[['gam_m']])     #1/time to recovery for mild cases
-    gam_h = exp(p[['gam_h']])     #1/time to removed (recovered or deceased) for hospitalized
-    mu = exp(p[['mu']])           #proportion of hospitalized cases who die
-
-  #Movement forcing function
-    m = descartes_force(t)
-  
-  # Model equations
-    dSdt = -S*beta*m*(Ip*cp+Ia*ca+Im*cm+Is*cs)/N
-    
-    dEdt = S*beta*m*(Ip*cp+Ia*ca+Im*cm+Is*cs)/N - E*sigma
-    
-    dIpdt = E*sigma - Ip*(alpha*lambda+(1-alpha)*lambda)
-    
-    dIadt = Ip*alpha*lambda - Ia*gam_a
-    
-    dIsdt = Ip*(1-alpha)*lambda - Is*(rho*delta_1+(1-rho)*delta_1)
-    
-    dImdt = Is*(1-rho)*delta_1 - Im*gam_m
-
-    dIhdt = Is*rho*delta_1 - Ih*delta_2
-
-    dHdt = Ih*delta_2 - H*(mu*gam_h + (1-mu)*gam_h)
-    
-    dDdt = H*mu*gam_h
-    
-    dRdt = Ia*gam_a+Im*gam_m+H*(1-mu)*gam_h
-
-    return(list(c(dSdt, dEdt, dIpdt, dIadt, dIsdt, dImdt, dIhdt, dHdt, dDdt, dRdt)))
-    
-} 
-
-```
-
-
-

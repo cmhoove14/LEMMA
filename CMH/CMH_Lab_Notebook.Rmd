@@ -160,6 +160,16 @@ The divergent transitions are probably still a major issue that needs to be reso
 # 5/27/20  
 Spent all day revisiting/revising my continuous time model, both stochastic and deterministic versions. Main goal was to try and fit a model forced with movement data of some sort and use to produce some projections based on movement data. Fitting is proving challenging. Tried just using optim with model fit based on least squared error of hospitalizations and deaths but that's pretty meh and not working for some reason. Also tried some old metropolis hastings algorithm code, but still working on that. Other end of the spectrum is to code it in STAN, but incorporating forcing functions in STAN appears to be less than simple. Long term goal would also be to divide the population in two and have the movement data allocated almost entirely to the second population following shelter in place
 
+# 5/28/20  
+Kept working with continuous time model(s), but used a version closer to LEMMA to make things simpler. Still working on getting fitting to work to the point where I'm confident moving the model and fitting procedure to a two-population model. Will go back to working on the ABM tomorrow.  
+
+# 5/29/20  
+Back to work on the ABM, some main things to accomplish today are to   
+
+* Introduce heterogeneity in network generation based on individual heterogeneity and also time of day dynamics (e.g. time when folks are at work/school, in the home, asleep, etc.)   
+* Introduce influence of illness on network   
+* Introduce testing, contact tracing   
+
 # ABM TODOs  
 ## Network TODOs  
 * Inform random network generation with individual characteristics, e.g. some individuals more "social": higher probability of generating random edges  
