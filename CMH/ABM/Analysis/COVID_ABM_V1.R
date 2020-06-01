@@ -6,27 +6,8 @@
 
 # FUNCTIONS (to be moved to R package infrastructure)
 # ---------------------------------------------------------
-setwd("CMH/ABM/")
+#setwd("CMH/ABM/")
 devtools::load_all()
-
-# Function to generate random edges on top of network
-#TODO: introduce heterogeneity into who generates random edges
-add.r.edges <- function(start.net, r.rate, r.trans.rate){
-  new.net <- start.net
-  #Number of random edges generated
-    n.r.edges <- rbinom(1, nrow(start.net), r.rate)
-  #Allocate random edges to network. Could add probs argument here to make some individuals more likely to have random contacts
-    r.pairs <- matrix(sample(nrow(start.net), 2*n.r.edges, replace = TRUE), ncol=2)
-  #If edge already exists in another capacity, keep it  
-    pre.edges <- new.net[r.pairs]
-    post.edges <- ifelse(pre.edges == 0, r.trans.rate, pre.edges)
-    new.net[r.pairs] <- post.edges
-
-  #Make symmetrical  
-    new.net <- sym.mat(new.net)
-  
-  return(new.net)
-}
 
 # ---------------------------------------------------------
 # SETUP
@@ -49,17 +30,17 @@ add.r.edges <- function(start.net, r.rate, r.trans.rate){
     trans.hh.sc <- 1.2     # increase in hh transmission when schools are closed
     trans.hh.sip <- 1.3    # increase in hh transmission when sheltered in place
     r.net.prob <- 0.5      # Probability of random interaction pre-intervention
-    r.net.prob.sc <- 0.4  # Probability of random interaction while schools are closed
+    r.net.prob.sc <- 0.4   # Probability of random interaction while schools are closed
     r.net.prob.sip <- 0.05 # Probability of random interaction while in shelter in place
     
 # Initial conditions
-  e.seed <- 1     #Exposed
+  e.seed <- 2     #Exposed
   ip.seed <- 0    #infected pre-symptomatic
   ia.seed <- 0    #infected asymptomatic
   im.seed <- 0    #infected mildly symptomatic
   imh.seed <- 0   #infected mildly symptomatic, will become severe
   ih.seed <- 0    #infected severely symptomatic
-  d.seed <- 0
+  d.seed <- 0     #dead
   r.seed <- 0     #removed
   s.seed <- N - e.seed - ip.seed - ia.seed - im.seed - imh.seed - ih.seed - d.seed - r.seed
   
@@ -72,61 +53,9 @@ add.r.edges <- function(start.net, r.rate, r.trans.rate){
     trans.school <- 0.075
     trans.other <- 0.025
     trans.asymp <- 0.61  #Reduction in transmission probability from pre/asymptomatics (https://doi.org/10.1101/2020.03.15.20036582)
-  
-  # Infection progression parameters all either exponentially or erlang distributed in order to compare to mass-action analogs
-    # Latent period
-      t.latent <- function(...) {rgamma(1, 11, 2)} # erlang distribution with mean 5.5 days, low variance
       
-    # Presymptomatic period (basically incubation period-latent period, this could maybe use some work)
-      t.presymp <- function(...) {rgamma(1, 1, 2)} # erlang distribution with mean 0.5 days
-      
-    # Probability of becoming mildly symptomatic vs. being asymptomatic
-      p.symp <- function(age) {dplyr::case_when(age %in% c(0:9) ~ 0.03,
-                                                age %in% c(10:19) ~ 0.05,
-                                                age %in% c(20:29) ~ 0.3,
-                                                age %in% c(30:39) ~ 0.55,
-                                                age %in% c(40:49) ~ 0.61,
-                                                age %in% c(50:59) ~ 0.75,
-                                                age %in% c(60:69) ~ 0.89,
-                                                age %in% c(70:79) ~ 0.9,
-                                                age >= 80 ~ 0.9)}
-      
-    # Time spent asymptomatic before recovery 
-      t.asymp <- function(...) {rgamma(1, 6, 1)} # erlang distribution with mean 6 days, longish tail
-      
-    # Probability of progressing from mildly to severely symptomatic
-      p.sevsymp <- function(age) {dplyr::case_when(age %in% c(0:9) ~ 0.004,
-                                                   age %in% c(10:19) ~ 0.004,
-                                                   age %in% c(20:29) ~ 0.01,
-                                                   age %in% c(30:39) ~ 0.04,
-                                                   age %in% c(40:49) ~ 0.09,
-                                                   age %in% c(50:59) ~ 0.13,
-                                                   age %in% c(60:69) ~ 0.19,
-                                                   age %in% c(70:79) ~ 0.2,
-                                                   age >= 80 ~ 0.25)}
-      
-    # Time spent mildly symptomatic before recovery if B(1, p.sevsymp)=1
-      t.msymp <- function(...) {rexp(1, 1/9)}
-      
-    # Time spent mildly symptomatic before progressing to severely symptomatic if B(1, p.sevsymp)=1
-      t.mtosev <- function(...) {rgamma(1, 7, 2)}
-      
-    # Time spent severely symptomatic before recovery/death
-      t.sevsymp <- function(...) {rgamma(1, 36, 3)} # erlang distribution with mean 12 days, low variance
-      
-    # Probability of dying given hospitalization from https://www.bmj.com/content/369/bmj.m1923 Fig 4 mean of sex-stratified 
-      p.mort <- function(age) {dplyr::case_when(age %in% c(0:9) ~ 0.01,
-                                                age %in% c(10:19) ~ 0.0205,
-                                                age %in% c(20:29) ~ 0.031,
-                                                age %in% c(30:39) ~ 0.0475,
-                                                age %in% c(40:49) ~ 0.0785,
-                                                age %in% c(50:59) ~ 0.12,
-                                                age %in% c(60:69) ~ 0.186,
-                                                age %in% c(70:79) ~ 0.3,
-                                                age >= 80 ~ 0.45)}
-        
-# Base network matrix and Network matrix through time
-  base.net <- matrix(data = 0, ncol = N, nrow = N)
+# Relationship network matrix and Network matrix through time
+  relation.mat <- matrix(data = 0, ncol = N, nrow = N)
   net.mat <- array(data = 0, dim = c(N,N,t.tot/dt))
   
 # Infection status through time
@@ -231,7 +160,7 @@ add.r.edges <- function(start.net, r.rate, r.trans.rate){
 # household network
 for(h in unique(family.membership[!is.na(family.membership)])){
   h.index <- which(family.membership==h)
-  base.net[t(combn(h.index, 2))] <- "H"
+  relation.mat[t(combn(h.index, 2))] <- "H"
 }
 
 # work network
@@ -240,18 +169,18 @@ for(w in unique(work.membership[!is.na(work.membership)])){
   if(length(w.index)==1){ # If one worker in the workplace, messes this up so just skip
     NULL
   } else {
-    base.net[t(combn(w.index, 2))] <- "W"
+    relation.mat[t(combn(w.index, 2))] <- "W"
   }
 }
 
 # school network
 for(s in unique(school.membership[!is.na(school.membership)])){
   s.index <- which(school.membership==s)
-  base.net[t(combn(s.index, 2))] <- "S"
+  relation.mat[t(combn(s.index, 2))] <- "S"
 }
 
 # Make network matrix symmetric
-  base.net <- sym.mat(base.net)
+  relation.mat <- sym.mat(relation.mat)
   
 # ---------------------------------------------------------
 
@@ -283,7 +212,7 @@ init.infection <- sample(c(rep("E", e.seed),
 
 #Prepare network for t1  
   # Replace contacts with transmission probabilities
-    t1.net <- base.net
+    t1.net <- relation.mat
     t1.net[which(t1.net == "H")] <- trans.hh
     t1.net[which(t1.net == "W")] <- trans.work
     t1.net[which(t1.net == "S")] <- trans.school
@@ -309,10 +238,10 @@ for(t in 2:(t.tot/dt)){
     
 # Update network based on epi advances and interventions
 # TODO: Implement infection influence on contact    
-  t.net <- base.net  
+  t.net <- relation.mat  
   
   #indices of individuals with symptoms
-  inf.w.symptoms <- which(inf.mat[,t] %in% c("Im", "Imh"))
+  #inf.w.symptoms <- which(inf.mat[,t] %in% c("Im", "Imh"))
   
   # Eliminate school connections if schools closed and increase hh contacts
     if(t.sc <= (t*dt) & (t*dt) <= t.sc.end){
@@ -379,4 +308,5 @@ for(t in 2:(t.tot/dt)){
   # On to the next one  
 }
  
+    
 test <- sum.inf.mat(inf.mat)       

@@ -7,7 +7,7 @@
 #' @return vector of individual degrees (number of contacts)
 #' @export
 
-get.degree <- function(net.mat){
+get_degree <- function(net.mat){
   net.mat[which(net.mat>0)] <- 1
   rowSums(net.mat)
 }
@@ -21,7 +21,7 @@ get.degree <- function(net.mat){
 #' @return matrix with columns corresponding to each infection state and rows filled with number people in each state at each time
 #' @export
 
-sum.inf.mat <- function(inf.mat){
+sum_inf_mat <- function(inf.mat){
   t.sim <- 1:ncol(inf.mat)
   out <- t(apply(inf.mat,2,function(x){
     S = sum(x == "S")
@@ -57,7 +57,17 @@ sum.inf.mat <- function(inf.mat){
 #' @return symmetric matrix
 #' @export
 
-sym.mat <- function(mat){
+sym_mat <- function(mat){
   mat[lower.tri(mat)] = t(mat)[lower.tri(mat)]
   return(mat)
 }
+
+#' @title Not in 
+#' 
+#' @description Opposite of `%in%`
+#' 
+#' @return function for opposite of `%in%``
+#' @export
+
+`%!in%` <- Negate(`%in%`)
+
