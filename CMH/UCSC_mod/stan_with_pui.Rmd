@@ -103,13 +103,13 @@ seir_inputs <- list()
 # sd of duration in "infectious" stage for hospitalized cases
   seir_inputs[['sigma_duration_pre_hosp']] = 1.0
 # mean duration in hospital for non-ICU cases
-  seir_inputs[['mu_duration_hosp_mod']] = 7.0
+  seir_inputs[['mu_duration_hosp_mod']] = 12.0
 # sd of duration in hospital for non-ICU cases
-  seir_inputs[['sigma_duration_hosp_mod']] = 1.0
+  seir_inputs[['sigma_duration_hosp_mod']] = 2.0
 # mean duration in hospital for ICU cases
   seir_inputs[['mu_duration_hosp_icu']] = 16.0
 # sd of duration in hospital for ICU cases
-  seir_inputs[['sigma_duration_hosp_icu']] = 4.0
+  seir_inputs[['sigma_duration_hosp_icu']] = 2.0
 
 # mean fraction of tested infectious
   seir_inputs[['mu_frac_tested']] = 0.25
@@ -238,8 +238,8 @@ saveRDS(stan_pui,
 
 # Compare model fits  
 ```{r sum_fits}
-stan_no_pui <- readRDS("Outputs/UCSC_SEIR_SF_2020-05-26.RDS")
-stan_pui <- readRDS("Outputs/SEIR_PUI_SF_2020-05-26.RDS")
+stan_no_pui <- readRDS("Outputs/UCSC_SEIR_SF_2020-06-01.RDS")
+stan_pui <- readRDS("Outputs/SEIR_PUI_SF_2020-06-01.RDS")
 
 # Summary function to get summaries across posteriors
 stan_post_sum <- function(d){
@@ -367,6 +367,16 @@ sigma_Hicu_comp %>%
                  alpha = 0.7) +
     theme_bw() +
     xlab("Sigma Hicu")
+```
+
+## Relationship between hospitalization durations and posterior fraction PUI positive  
+```{r duration_frac_scatter}
+plot(stan_pui$duration_hosp_mod, stan_pui$frac_puipos,
+     pch = 16, xlab = "Hospitalized duration", ylab = "Fraction PUI positive")
+
+plot(stan_pui$duration_hosp_icu, stan_pui$frac_puipos,
+     pch = 16, xlab = "ICU duration", ylab = "Fraction PUI positive")
+
 ```
 
 ## Case numbers  
