@@ -405,21 +405,21 @@ ggplot() +
 lemma_2pop_odes = function(t, n, p) { 
 
   # States
-    S = n[1]
-    E = n[2]
-    Ir = n[3]
-    Ih = n[4]
-    H = n[5]
-    D = n[6]
-    R = n[7]
+    S1 = n[1]
+    E1 = n[2]
+    Ir1 = n[3]
+    Ih1 = n[4]
+    H1 = n[5]
+    D1 = n[6]
+    R1 = n[7]
  
-    S = n[8]
-    E = n[9]
-    Ir = n[10]
-    Ih = n[11]
-    H = n[12]
-    D = n[13]
-    R = n[14]
+    S2 = n[8]
+    E2 = n[9]
+    Ir2 = n[10]
+    Ih2 = n[11]
+    H2 = n[12]
+    D2 = n[13]
+    R2 = n[14]
  
   # Parameters
     N = exp(p[['N']])             #population size
@@ -437,9 +437,9 @@ lemma_2pop_odes = function(t, n, p) {
     m = descartes_force(t)
   
   # Model equations pop 1
-    dS1dt = -S*beta*m*(Ir*cr+Ih*ch)/N
+    dS1dt = -S1*beta*m*(Ir*cr+Ih*ch)/N
     
-    dE1dt = S*beta*m*(Ir*cr+Ih*ch)/N - E*sigma
+    dE1dt = S1*beta*m*(Ir*cr+Ih*ch)/N - E*sigma
     
     dIr1dt = E*(1-alpha)*sigma - Ir*gam_r
     
