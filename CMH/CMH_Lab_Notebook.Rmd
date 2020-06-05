@@ -175,13 +175,38 @@ Back to work on the ABM, some main things to accomplish today are to:
 Introduced individual traits `q.prob` and `r.net.rate` corresponding to individual probabilities of quarantining given infection and being involved in random edges in the network, respectively. Right now these are generated randomly, but should be informed by other characteristics as well as testing/contact tracing in the future.
 
 ### STAN  
-Did some debugging of the STAN model with PUI added by restricting the hospitalization/icu length of stayand  
+Did some debugging of the STAN model with PUI added by restricting the hospitalization/icu length of stay. Fit the STAN model to data from TN and StL for ultimate comparison to LEMMA fits with the spline on $\beta$ that Josh is working on  
+
+# 6/2/2020  
+Working on editing stan models to fit to different data types since different areas have different combinations of testing, cases, hospital admissions, hospital census, icu admissions/census, PUI, and deaths. So have several versions of the STAN model now including:  
+
+* `UCSC_SEIR` - the original STAN model from UCSC  
+* `SEIR_PUI` -  the original STAN model with PUI in hospitals added in the observed data and parameter `frac_puipos`  
+* `SEIR_Hosp_Only` - Fitting only to hospital census data, all other data and fitting removed    
+* `SEIR_Hosp_Census_admin` - Fitting to hospital census and admissions data (`obs_Hadm` and `hosp_adm` added, other observations removed)  
+* `SEIR_Hosp_Admissions` - Fitting to hospital admissions data only; *This one was causing some issues and after talking with Phil, seemed like the data wasn't strong enough to influence the fit given the data. Added some leading 0s in the hospitalizations data, reduced the initial beta estimate, reduced the variance parameter for the model fit*  
+
+# 6/4/2020  
+Investigating triggers based on hospitalizations/testing for returning to SiP/some other method to reduce $\mathcal{R}_e$. Using the continuous time model with a forcing function that causes relative changes in $\beta$ at a few key time points (school closures, SiP start, mid April, mid May, and last time point). Fitting involves estmiating the baseline $\beta$, $\alpha$, and $\mu$ parameters as well as the relative changes in $\beta$ at each time point.  
+
+For ultimate goal of deriving triggers from testing data, think it helps to think about what exactly the question is here, because there's more to it than what it seems. First question is what kinds of people are being tested. SF is doing about 1600 tests per day with a test+ rate of around 2.5%, but we don't know the extent to which this sample is biased by 1) time, 2) infection status, and 3) risk. If positive cases are mostly those who are already in the hospital, that doesn't really tell us anything more than hopsitalizations tells us. If people are getting tested as soon as they have symptoms, but then aren't confirmed positive for another 3 days, that also introduces a lag that has big implications for our trigger.
+
+Another set of questions revolves around what exactly we want the trigger to represent. E.g. should the trigger be tripped when we reach a point that threatens to overrun hospitals in the next week? In the next two weeks?
+
+### Meeting with Josh:  
+
+* Start with assumption that 1600 people per day are sampled randomly  
+* Don't worry about reporting time delay for now, or maybe next day?  
+* Answer question as to whether it IS possible to use as an early warning  
+* What are we trying to avoid? Total number of cases getting above X, or hospitalizations going above Y  
+* For a given trigger, what are the key Epi metrics at some date in the future?  
+* Two different levels of Re, 1.1 or 1.4 starting June 15th, different testing metrics for implementing trigger  
 
 # ABM TODOs  
 ## Network TODOs  
 * Inform random network generation with individual characteristics, e.g. some individuals more "social": higher probability of generating random edges. Currently implemented with `r.net.prob`, but should introduce heterogeneity based on other characteristics rather than have it generated randomly  
 * Introduce heterogeneity in workplace network: e.g. some work networks dissolved under shelter in place, others persist (essential workers). Maybe have one type of workplace be healthcare workers whcih specifically interact with hospitalized individuals?    
-* Better inform `q.prob` vector in `quarantine symptomatics` function such that worker status, past experience of infection (e.g. family members were infected/tested), etc. influence probability of staying home given symptoms    
+* Better inform `q.prob` vector in `quarantine_symptomatics` function such that worker status, past experience of infection (e.g. family members were infected/tested), etc. influence probability of staying home given symptoms    
 * Look at network characteristics like mean degree, degree distribution  
 * Implement testing and isolation on network  
 

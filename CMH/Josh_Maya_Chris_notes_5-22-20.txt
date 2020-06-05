@@ -32,7 +32,35 @@ Josh Maya Chris 5/22/20 notes
 			-They have a target parameter and everything but are also doing simulations and stuff
 ***Priorities: 
 	-buffing up LEMMA or adapting SC?
+		-Manually input interventions in order for Rt to change, this is starting to seem insufficient
+		-What can we say about places that lift shelter in place?
+			-Josh working on this
+			-I'll work on incorporating new functionality into STAN to see how that goes
 	-using ABM to say something quantitative about nature of mission study/outbreak
 	-role of two-population model as well and comparison to LEMMA
 
-	
+6/1/2020
+-Move back end to STAN?
+	-Maybe try adding a beta spline to LEMMA base code?
+	-What exactly is the test case?
+		-Take San Francisco, Alameda, and St. Louis (or TN?), run fit with flexible (spline) beta in LEMMA plus STAN model
+		-Have we looked to see what the posteriors are on e.g. durations to make sure they're reasonable?
+			-Have enough evidence to make a decision by next Monday (6/8/20)
+			-Send TN data to Josh
+			-I'll run modified STAN model on some test cases
+				-TN and St. Louis hospitalized and deaths
+-Check in about ABM and concentrated control strategies
+	-Question from the city about an early warning system
+		-Current testing as an early warning system?
+			-Convenience sample 
+			-~1600 tests per day
+				-What is the soonest we could detect a trigger for action given current testing?
+				-Leave out contact tracing for now
+				-How well does a random 1600 tests/per day detect resurgence?
+				-NOT a random sample, but what if it was?
+				-More intensive sampling of some high risk group?
+					-Do we know sampling probabilities
+					-Show influence of random sampling vs. when we know sampling probabilities
+					-Show influence of knowing sampling probabilities by collecting data on who's tested
+		-Could also segway into thinking about concentrated epidemics and that sort of thing
+	-cobiostat
