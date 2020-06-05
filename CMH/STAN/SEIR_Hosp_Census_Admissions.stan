@@ -216,7 +216,7 @@ transformed parameters {
     vector[nt] beta;
     vector[nbeta+p-1] beta_control;
     real Rt[nt];
-    real hosp_admin[nt];
+    real hosp_adm[nt];
     {
         // variables in curly brackets will not have output, they are local variables
         int ibetaoffset;
@@ -356,6 +356,9 @@ transformed parameters {
             
             x[Hicu,it+1] = Hicu_live_new + Hicu_mort_new;
 
+            //Get hospital admissions
+            hosp_adm[it] = newhosp_mod + newhosp_icu;
+            
             //////////////////////////////////////////
             // recovery/death
 
@@ -390,8 +393,9 @@ transformed parameters {
         for (iage in 1:nage){
             Rt[nt] = Rt[nt] + S_cur[iage]/npoptotal * beta[nt] * (frac_I[iage][1]*duration_rec_asym + frac_I[iage][2]*duration_rec_mild + (1.0-frac_I[iage][1]-frac_I[iage][2])*duration_pre_hosp);
         }
-        //Get hospital admissions
-        hosp_admin = newhosp_mod[nt] + newhosp_icu[nt]
+        // Get hospital admissions for last timestep
+        hosp_adm[nt] = newhosp_mod + newhosp_icu;
+
     }
 }
 model {
@@ -427,8 +431,14 @@ model {
             tmp = (obs_Hmod[iobs]-(x[Hmod,thobs[iobs]]+x[Hicu,thobs[iobs]]))/sigma_Hmod;
             tmp ~ std_normal();
 
-            tmp = (obs_Hadm[iobs]-hosp_admin)/sigma_Hmod;
+            tmp = (obs_Hadm[iobs]-hosp_adm[thobs[iobs]])/sigma_Hmod;
             tmp ~ std_normal();
         }
+    }
+}
+generated quantities{
+    real hospitalized[nt];
+    for (it in 1:nt){
+        hospitalized[it] = x[Hmod,it] + x[Hicu,it];
     }
 }

@@ -1,0 +1,665 @@
+---
+title: "Stan fit StL and TN"
+author: "Chris Hoover"
+date: "6/2/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,
+                      fig.align = "left",
+                      fig.height = 6,
+                      fig.width = 8)
+
+require(rstan)
+require(readxl)
+require(tidyverse)
+
+# Rstan prep
+options(mc.cores = parallel::detectCores())
+rstan_options(auto_write = TRUE)
+Sys.setenv(LOCAL_CPPFLAGS = '-march=corei7 -mtune=corei7')
+
+# Summary function to get summaries across posteriors
+stan_post_sum <- function(d){
+  thing.med <- median(d)
+  thing.mean <- mean(d)
+  thing.75 <- quantile(d, 0.75)
+  thing.25 <- quantile(d, 0.25)
+  thing.975 <- quantile(d, 0.975)
+  thing.025 <- quantile(d, 0.025)
+  
+  return(c("q.mean" = thing.mean, 
+           "q.50" = thing.med, 
+           "q.75" = thing.75, 
+           "q.25" = thing.25, 
+           "q.975" = thing.975, 
+           "q.025" = thing.025))
+}
+
+```
+
+```{r fit_data}
+TN_all <- readRDS("../TN/Data/TN_all_2020-06-04.RDS")
+TN_nsh <- readRDS("../TN/Data/TN_counties_2020-06-01.RDS") %>% 
+  filter(COUNTY == "Davidson")
+StL <- read_xlsx("Data/StLMay20-adjusted priors.xlsx", sheet = "Data",
+                 skip = 8)
+
+```
+
+```{r mod_setup}
+start.date <- as.Date("2020-01-23")
+end.date <- as.Date("2020-07-01")
+
+stl_inputs <- list()
+
+# the number of age groups
+  stl_inputs[['nage']] = 1 
+
+# the population for each age group
+  stl_inputs[['npop']] = array(400000)
+# the fraction of hospitalized cases (ICU + non-ICU)
+  stl_inputs[['frac_hosp']] = array(0.07)
+# the fraction of ICU cases
+  stl_inputs[['frac_icu']] = array(0.02)
+# the death rate of infected
+  stl_inputs[['frac_mort']] = array(0.01)
+# the fraction of asymptomatic cases
+  stl_inputs[['frac_asym']] = array(0.178)
+
+# a parameter modifying the prior uncertainty in the fractions above (set to 1000.0 for `nage` > 1)
+  stl_inputs[['alpha_multiplier']] = 100.0
+
+# mean duration in "exposed" stage
+  stl_inputs[['mu_duration_lat']] = 5.0
+# standard deviation (sd) of duration in "exposed" stage
+  stl_inputs[['sigma_duration_lat']] = 2.0
+# mean duration in "infectious" stage for asymptomatic cases
+  stl_inputs[['mu_duration_rec_asym']] = 7.0
+# sd of duration in "infectious" stage for asymptomatic cases
+  stl_inputs[['sigma_duration_rec_asym']] = 5.0
+# mean duration in "infectious" stage for mild cases
+  stl_inputs[['mu_duration_rec_mild']] = 7.0
+# sd of duration in "infectious" stage for mild cases
+  stl_inputs[['sigma_duration_rec_mild']] = 5.0
+# mean duration in "infectious" stage for hospitalized cases
+  stl_inputs[['mu_duration_pre_hosp']] = 5.0
+# sd of duration in "infectious" stage for hospitalized cases
+  stl_inputs[['sigma_duration_pre_hosp']] = 1.0
+# mean duration in hospital for non-ICU cases
+  stl_inputs[['mu_duration_hosp_mod']] = 12.0
+# sd of duration in hospital for non-ICU cases
+  stl_inputs[['sigma_duration_hosp_mod']] = 2.0
+# mean duration in hospital for ICU cases
+  stl_inputs[['mu_duration_hosp_icu']] = 12.0
+# sd of duration in hospital for ICU cases
+  stl_inputs[['sigma_duration_hosp_icu']] = 2.0
+
+# lambda parameter for initial conditions of "exposed"
+  stl_inputs[['lambda_ini_exposed']] = 0.3
+
+# mean initial beta estimate
+  stl_inputs[['mu_beta1']] = 0.2
+# sd initial beta estimate
+  stl_inputs[['sigma_beta1']] = 0.02
+
+# distance in time between the knots used to construct the splines 
+  stl_inputs[['dknot']] = 10
+
+# spline mode (must be 1 or 2)
+# splinemode = 1: estimate beta up to today
+# splinemode = 2: estimate beta up to dknot days before today, then assume constant value up to today
+  stl_inputs[['splinemode']] = 1
+
+# number of interventions
+  stl_inputs[['ninter']] = 1
+  
+# length of each intervention
+  stl_inputs[['len_inter']] = array(10)
+# mean change in beta through intervention 
+  stl_inputs[['mu_beta_inter']] = array(1.0)
+# sd change in beta through intervention
+  stl_inputs[['sigma_beta_inter']] = array(0.5)
+
+tn_inputs <- stl_inputs
+nsh_inputs <- stl_inputs
+
+#Pop of TN
+tn_inputs[["npop"]] <- array(6829174)
+
+#Pop of Davidson county
+nsh_inputs[["npop"]] <- array(694144)
+```
+
+# St. Louis  
+## Fit to StL hospital census data  
+
+```{r stl_run, cache = T}
+# Timeframe for simulation. Can replace Sys.Date() with any date at which to cut off model fitting
+  itoday_1based = Sys.Date()-start.date
+  
+# specify the date up to when beta is estimated
+  stl_inputs[['itoday']] = as.numeric(itoday_1based)
+
+# the number of days to run the model for
+  stl_inputs[['nt']] = as.numeric(as.Date(end.date) - as.Date(start.date))
+  
+# Put data into list. Added some leading 0s to help fitting
+  stl_inputs[['nhobs']] <- nrow(StL)+10
+  stl_inputs[['thobs']] <- as.numeric(c(as.Date(StL$date[1]) - start.date+c(-10:-1),
+                                        as.Date(StL$date) - start.date))
+  stl_inputs[['obs_Hmod']] <- c(rep(0,10), StL$hosp.lower/0.9)
+
+# start time of each interventions
+  stl_inputs[['t_inter']] = array(as.numeric(itoday_1based+5))
+
+# Run the stan model  
+StL_fit <- stan(
+  file = "SEIR_Hosp_Only.stan",
+  data = stl_inputs,
+  thin = 5,
+  chains = 4,
+  warmup = 500,
+  iter = 3000,
+  cores = 4,
+  refresh = 100,
+  control = list(adapt_delta = 0.95)
+)
+
+stan_StL <- rstan::extract(StL_fit, permuted = T)
+
+# State variables summary from model
+state_vars <- c("S", "E", "Ia", "Im", "Ip", "Hosp", "Hicu", "Rlive", "Rdead")
+  
+StL_state_vars <- do.call(rbind, lapply(1:dim(stan_StL$x)[2], function(s){
+  as_tibble(t(apply(stan_StL$x[,s,],2,stan_post_sum))) %>% 
+    mutate(State = state_vars[s],
+           obs = row_number(),
+           Date = as.Date(start.date+obs),
+           fit = "Hospital Census")
+}))
+
+colnames(StL_state_vars)[1:6] <- c("var_mean", "var_med", "var_75th", "var_25th", "var_975th", "var_025th")
+
+# Hospitalizations output
+StL_hosp <- stan_StL$hospitalized
+
+StL_hosp_sum <- t(apply(StL_hosp, 2, stan_post_sum))
+
+colnames(StL_hosp_sum) <- c("hosp_mean", "hosp_med", "hosp_75th", "hosp_25th", "hosp_975th", "hosp_025th")
+ 
+StL_hosp_sum <- StL_hosp_sum %>% as_tibble() %>% 
+  mutate(obs = row_number(),
+         Date = as.Date(start.date+obs))
+
+```
+
+### Diagnostics  
+#### Traceplots 
+```{r stl_traces}
+traceplot(StL_fit,
+          pars = names(stan_StL)[which(grepl("duration", names(stan_StL)))])
+```
+
+#### Posteriors  
+```{r stl_posteriors}
+stan_dens(StL_fit, 
+          pars = names(stan_StL)[which(grepl("duration", names(stan_StL)))], 
+          separate_chains = TRUE)
+
+```
+
+#### Comparison to observed data    
+```{r StL_plot}
+ggplot() +
+  theme_bw() +
+  theme(axis.text.x = element_text(size = 11, 
+                                   angle = 45,
+                                   hjust = 1),
+        axis.title = element_text(size = 14)) +
+# Hospitalizations uncertainty intervals  
+  geom_ribbon(data = StL_hosp_sum,
+              aes(x = Date, 
+                  ymax = hosp_75th,
+                  ymin = hosp_25th),
+              fill = "darkblue",
+              alpha = 0.3) +
+  geom_ribbon(data = StL_hosp_sum, 
+              aes(x = Date, 
+                  ymax = hosp_975th,
+                  ymin = hosp_025th),
+              fill = "darkblue",
+              alpha = 0.1) +
+# Observed data
+  geom_point(data = StL,
+             aes(x = as.Date(date), y = hosp.lower/0.9),
+             pch = 17) +
+# Model means
+  geom_line(data = StL_hosp_sum,
+            aes(x = Date, y = hosp_med),
+            col = "darkblue") +
+# Formatting
+  scale_x_date(date_labels = "%m/%d", 
+               date_breaks = "7 day",
+               limits = as.Date(c("2020-02-16",
+                                  "2020-07-01")))+
+  ylim(c(0, max(StL$hosp.lower/0.9, na.rm = T)+50)) +
+  labs(y = "Hospitalizations",
+       title = "StL hospital census fit")
+
+```
+
+## Fit to StL hospital census and admissions data  
+
+```{r stl_run2, cache = T}
+stl_inputs2 <- stl_inputs
+
+# Add admissions data with some leading 0s
+  stl_inputs2[['obs_Hadm']] <- c(rep(0,10),StL$new.admits.lower/0.9)
+
+# Run the stan model  
+StL_fit2 <- stan(
+  file = "SEIR_Hosp_Census_Admissions.stan",
+  data = stl_inputs2,
+  thin = 5,
+  chains = 4,
+  warmup = 500,
+  iter = 3000,
+  cores = 4,
+  refresh = 100,
+  control = list(adapt_delta = 0.95)
+)
+
+stan_StL2 <- rstan::extract(StL_fit2, permuted = T)
+
+# State variables summary from model
+StL_state_vars2 <- do.call(rbind, lapply(1:dim(stan_StL2$x)[2], function(s){
+  as_tibble(t(apply(stan_StL2$x[,s,],2,stan_post_sum))) %>% 
+    mutate(State = state_vars[s],
+           obs = row_number(),
+           Date = as.Date(start.date+obs),
+           fit = "Hospital Census + Admissions")
+}))
+
+colnames(StL_state_vars2)[1:6] <- c("var_mean", "var_med", "var_75th", "var_25th", "var_975th", "var_025th")
+
+# Hospitalizations census output
+StL_hosp2 <- stan_StL2$hospitalized
+
+StL_hosp_sum2 <- t(apply(StL_hosp2, 2, stan_post_sum))
+
+colnames(StL_hosp_sum2) <- c("hosp_mean", "hosp_med", "hosp_75th", "hosp_25th", "hosp_975th", "hosp_025th")
+ 
+StL_hosp_sum2 <- StL_hosp_sum2 %>% as_tibble() %>% 
+  mutate(obs = row_number(),
+         Date = as.Date(start.date+obs))
+
+# Hospitalizations admissions output
+StL_adm2 <- stan_StL2$hosp_adm
+
+StL_adm_sum2 <- t(apply(StL_adm2, 2, stan_post_sum))
+
+colnames(StL_adm_sum2) <- c("adm_mean", "adm_med", "adm_75th", "adm_25th", "adm_975th", "adm_025th")
+ 
+StL_adm_sum2 <- StL_adm_sum2 %>% as_tibble() %>% 
+  mutate(obs = row_number(),
+         Date = as.Date(start.date+obs))
+
+```
+
+### Diagnostics  
+#### Traceplots 
+```{r stl_traces2}
+traceplot(StL_fit2,
+          pars = names(stan_StL2)[which(grepl("duration", names(stan_StL2)))])
+```
+
+#### Posteriors  
+```{r stl_posteriors2}
+stan_dens(StL_fit2, 
+          pars = names(stan_StL2)[which(grepl("duration", names(stan_StL2)))], 
+          separate_chains = TRUE)
+
+```
+
+#### Comparison to observed data    
+```{r StL_plot2}
+ggplot() +
+  theme_bw() +
+  theme(axis.text.x = element_text(size = 11, 
+                                   angle = 45,
+                                   hjust = 1),
+        axis.title = element_text(size = 14)) +
+# Hospitalizations uncertainty intervals  
+  geom_ribbon(data = StL_hosp_sum2,
+              aes(x = Date, 
+                  ymax = hosp_75th,
+                  ymin = hosp_25th),
+              fill = "darkblue",
+              alpha = 0.3) +
+  geom_ribbon(data = StL_hosp_sum2, 
+              aes(x = Date, 
+                  ymax = hosp_975th,
+                  ymin = hosp_025th),
+              fill = "darkblue",
+              alpha = 0.1) +
+# Observed data
+  geom_point(data = StL,
+             aes(x = as.Date(date), y = hosp.lower/0.9),
+             pch = 17) +
+# Model means
+  geom_line(data = StL_hosp_sum2,
+            aes(x = Date, y = hosp_med),
+            col = "darkblue") +
+# Formatting
+  scale_x_date(date_labels = "%m/%d", 
+               date_breaks = "7 day",
+               limits = as.Date(c("2020-02-16",
+                                  "2020-07-01")))+
+  ylim(c(0, max(StL$hosp.lower/0.9, na.rm = T)+50)) +
+  labs(y = "Hospitalizations",
+       title = "StL hospital admissions + census fit")
+
+```
+
+```{r StL_adm_plot2}
+ggplot() +
+  theme_bw() +
+  theme(axis.text.x = element_text(size = 11, 
+                                   angle = 45,
+                                   hjust = 1),
+        axis.title = element_text(size = 14)) +
+# Hospitalizations uncertainty intervals  
+  geom_ribbon(data = StL_adm_sum2,
+              aes(x = Date, 
+                  ymax = adm_75th,
+                  ymin = adm_25th),
+              fill = "darkblue",
+              alpha = 0.3) +
+  geom_ribbon(data = StL_adm_sum2, 
+              aes(x = Date, 
+                  ymax = adm_975th,
+                  ymin = adm_025th),
+              fill = "darkblue",
+              alpha = 0.1) +
+# Observed data
+  geom_point(data = StL,
+             aes(x = as.Date(date), y = new.admits.lower/0.9),
+             pch = 17) +
+# Model means
+  geom_line(data = StL_adm_sum2,
+            aes(x = Date, y = adm_med),
+            col = "darkblue") +
+# Formatting
+  scale_x_date(date_labels = "%m/%d", 
+               date_breaks = "7 day",
+               limits = as.Date(c("2020-02-16",
+                                  "2020-07-01")))+
+  ylim(c(0, max(StL$hosp.lower/0.9, na.rm = T)+50)) +
+  labs(y = "Hospital admissions",
+       title = "StL hospital admissions + census fit")
+
+```
+
+
+## Fit to StL hospital admissions data only  
+
+```{r stl_run3, cache = T}
+# Can use same inputs for census plus admits, it will just have some extra data  
+# Run the stan model  
+StL_fit3 <- stan(
+  file = "SEIR_Hosp_Admissions.stan",
+  data = stl_inputs2,
+  thin = 5,
+  chains = 4,
+  warmup = 500,
+  iter = 3000,
+  cores = 4,
+  refresh = 100,
+  control = list(adapt_delta = 0.95)
+)
+
+stan_StL3 <- rstan::extract(StL_fit3, permuted = T)
+
+# State variables summary from model
+StL_state_vars3 <- do.call(rbind, lapply(1:dim(stan_StL3$x)[2], function(s){
+  as_tibble(t(apply(stan_StL3$x[,s,],2,stan_post_sum))) %>% 
+    mutate(State = state_vars[s],
+           obs = row_number(),
+           Date = as.Date(start.date+obs),
+           fit = "Hospital Admissions")
+}))
+
+colnames(StL_state_vars3)[1:6] <- c("var_mean", "var_med", "var_75th", "var_25th", "var_975th", "var_025th")
+
+# Hospitalizations admissions output
+StL_adm3 <- stan_StL3$hosp_adm
+
+StL_adm_sum3 <- t(apply(StL_adm3, 2, stan_post_sum))
+
+colnames(StL_adm_sum3) <- c("adm_mean", "adm_med", "adm_75th", "adm_25th", "adm_975th", "adm_025th")
+ 
+StL_adm_sum3 <- StL_adm_sum3 %>% as_tibble() %>% 
+  mutate(obs = row_number(),
+         Date = as.Date(start.date+obs))
+
+```
+
+### Diagnostics  
+#### Traceplots 
+```{r stl_traces3}
+traceplot(StL_fit3,
+          pars = names(stan_StL3)[which(grepl("duration", names(stan_StL3)))])
+```
+
+#### Posteriors  
+```{r stl_posteriors3}
+stan_dens(StL_fit3, 
+          pars = names(stan_StL3)[which(grepl("duration", names(stan_StL3)))], 
+          separate_chains = TRUE)
+
+```
+
+#### Comparison to observed data    
+
+```{r StL_adm_plot3}
+ggplot() +
+  theme_bw() +
+  theme(axis.text.x = element_text(size = 11, 
+                                   angle = 45,
+                                   hjust = 1),
+        axis.title = element_text(size = 14)) +
+# Hospitalizations uncertainty intervals  
+  geom_ribbon(data = StL_adm_sum3,
+              aes(x = Date, 
+                  ymax = adm_75th,
+                  ymin = adm_25th),
+              fill = "darkblue",
+              alpha = 0.3) +
+  geom_ribbon(data = StL_adm_sum3, 
+              aes(x = Date, 
+                  ymax = adm_975th,
+                  ymin = adm_025th),
+              fill = "darkblue",
+              alpha = 0.1) +
+# Observed data
+  geom_point(data = StL,
+             aes(x = as.Date(date), y = new.admits.lower/0.9),
+             pch = 17) +
+# Model means
+  geom_line(data = StL_adm_sum3,
+            aes(x = Date, y = adm_med),
+            col = "darkblue") +
+# Formatting
+  scale_x_date(date_labels = "%m/%d", 
+               date_breaks = "7 day",
+               limits = as.Date(c("2020-02-16",
+                                  "2020-07-01")))+
+  ylim(c(0, max(StL$hosp.lower/0.9, na.rm = T)+50)) +
+  labs(y = "Hospital Admissions",
+       title = "StL hospital admissions fit")
+
+```
+
+## Compare StL fits across different data sources used for fitting  
+```{r plot_comp}
+as_tibble(rbind(StL_state_vars, StL_state_vars2, StL_state_vars3)) %>% 
+  filter(State %in% c("Hosp", "Hicu", "Rdead")) %>% 
+  ggplot() +
+    theme_bw() +
+    theme(axis.text.x = element_text(size = 11, 
+                                     angle = 45,
+                                     hjust = 1),
+          axis.title = element_text(size = 14)) +
+  # Hospitalizations uncertainty intervals  
+    geom_ribbon(aes(x = Date, 
+                    ymax = var_975th,
+                    ymin = var_025th,
+                    fill = fit),
+                alpha = 0.1) +
+    geom_ribbon(aes(x = Date, 
+                    ymax = var_75th,
+                    ymin = var_25th,
+                    fill = fit),
+                alpha = 0.3) +
+  # Model means
+    geom_line(aes(x = Date, y = var_med, col = fit)) +
+  # Formatting
+    facet_wrap(State~., nrow = 3, scales = "free") +
+    scale_x_date(date_labels = "%m/%d", 
+                 date_breaks = "7 day",
+                 limits = as.Date(c("2020-02-16",
+                                    "2020-07-01")))+
+    labs(y = "Hospital Admissions",
+         title = "StL hospital admissions fit")
+
+```
+
+```{r plot_sigma_Hmod}
+StL_sigma_Hmods <- data.frame("sigma_Hmod" = c(stan_StL$sigma_Hmod, stan_StL2$sigma_Hmod, stan_StL3$sigma_Hmod),
+                              "fit" = c(rep("Hospital Census", length(stan_StL$sigma_Hmod)),
+                                        rep("Hospital Census + Admissions", length(stan_StL2$sigma_Hmod)),
+                                        rep("Hospital Admissions", length(stan_StL3$sigma_Hmod))))
+
+StL_sigma_Hmods %>% 
+  ggplot() +
+    theme_bw() +
+    theme(axis.text.x = element_text(size = 11),
+          axis.title = element_text(size = 14)) +
+    geom_density(aes(sigma_Hmod, fill = fit),
+                 alpha = 0.6)
+```
+
+# Tennessee  
+## Fit to TN hospital admissions only   
+
+```{r TN_adm, cache = T}
+# specify the date up to when beta is estimated
+  tn_inputs[['itoday']] = as.numeric(itoday_1based)
+
+# the number of days to run the model for
+  tn_inputs[['nt']] = as.numeric(as.Date(end.date) - as.Date(start.date))
+  
+# Put data into list
+  tn_inputs[['nhobs']] <- nrow(TN_all %>% filter(!is.na(NEW_HOSP))) + 10
+  
+  TN_start <- as.Date(TN_all %>% 
+                        filter(!is.na(NEW_HOSP)) %>% 
+                        pull(DATE))[1]
+  
+  tn_inputs[['thobs']] <- as.numeric(c(TN_start - start.date + c(-10:-1),
+                                       as.Date(TN_all %>% 
+                                               filter(!is.na(NEW_HOSP)) %>% 
+                                               pull(DATE)) - start.date))
+  
+  tn_inputs[['obs_Hadm']] <- c(rep(0,10), 
+                               TN_all %>% filter(!is.na(NEW_HOSP)) %>% pull(NEW_HOSP))
+
+# start time of each interventions
+  tn_inputs[['t_inter']] = array(as.numeric(itoday_1based+5))
+  
+# Run the stan model  
+TN_fit <- stan(
+  file = "SEIR_Hosp_Admissions.stan",
+  data = tn_inputs,
+  thin = 5,
+  chains = 4,
+  warmup = 500,
+  iter = 3000,
+  cores = 4,
+  refresh = 100,
+  control = list(adapt_delta = 0.95)
+)
+
+stan_TN_adm <- rstan::extract(TN_fit, permuted = T)
+
+# Hospitalizations admissions output
+TN_adm <- stan_TN_adm$hosp_adm
+
+TN_adm_sum <- t(apply(TN_adm, 2, stan_post_sum))
+
+colnames(TN_adm_sum) <- c("adm_mean", "adm_med", "adm_75th", "adm_25th", "adm_975th", "adm_025th")
+ 
+TN_adm_sum <- TN_adm_sum %>% as_tibble() %>% 
+  mutate(obs = row_number(),
+         Date = as.Date(start.date+obs))
+
+```
+
+### Diagnostics  
+#### Traceplots 
+```{r TN_traces}
+traceplot(TN_fit,
+          pars = names(stan_TN_adm)[which(grepl("duration", names(stan_TN_adm)))])
+```
+
+#### Posteriors  
+```{r TN_posteriors}
+stan_dens(TN_fit, 
+          pars = names(stan_TN_adm)[which(grepl("duration", names(stan_TN_adm)))], 
+          separate_chains = TRUE)
+
+```
+
+#### Comparison to observed data    
+
+```{r TN_plot_fit}
+ggplot() +
+  theme_bw() +
+  theme(axis.text.x = element_text(size = 11, 
+                                   angle = 45,
+                                   hjust = 1),
+        axis.title = element_text(size = 14)) +
+# Hospitalizations uncertainty intervals  
+  geom_ribbon(data = TN_adm_sum,
+              aes(x = Date, 
+                  ymax = adm_75th,
+                  ymin = adm_25th),
+              fill = "darkblue",
+              alpha = 0.3) +
+  geom_ribbon(data = TN_adm_sum, 
+              aes(x = Date, 
+                  ymax = adm_975th,
+                  ymin = adm_025th),
+              fill = "darkblue",
+              alpha = 0.1) +
+# Observed data
+  geom_point(data = TN_all,
+             aes(x = as.Date(DATE), y = NEW_HOSP),
+             pch = 17) +
+# Model means
+  geom_line(data = TN_adm_sum,
+            aes(x = Date, y = adm_med),
+            col = "darkblue") +
+# Formatting
+  scale_x_date(date_labels = "%m/%d", 
+               date_breaks = "7 day",
+               limits = as.Date(c("2020-02-16",
+                                  "2020-07-01")))+
+  ylim(c(0, max(StL$hosp.lower/0.9, na.rm = T)+50)) +
+  labs(y = "Hospital Admissions",
+       title = "TN hospital admissions fit")
+
+```
+
