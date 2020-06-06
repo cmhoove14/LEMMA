@@ -10,16 +10,15 @@ devtools::load_all("CMH/ABM/")
 # SETUP
 # TODO: incorporate testing frequency/testing regime
 # ---------------------------------------------------------
-
+set.seed(430)
 # Number of people, key dates, transmission probability 
   N <- 9e5
   risks <- rbeta(N, 2, 2)
-  bta <- 0.2
+  bta <- 1
   
   pop.props <- c(0.06+0.061, 0.065+0.066, 0.066+0.5*0.139, 0.5*0.139+0.5*0.127, 0.127, 0.5*0.127+0.066, 0.063+0.5*0.093, 0.5*0.093+0.5*0.048,0.5*0.048+0.019)
   names(pop.props) <- c(seq(0,70,10), 80)  # 80 is anyone older than 80
   pop.ages <- as.numeric(sample(names(pop.props), size = N, replace = TRUE, prob = pop.props))
-
 
 # Key Dates
   t0 <- as.Date("2020-02-15")
@@ -27,15 +26,31 @@ devtools::load_all("CMH/ABM/")
 # Beta change dates
   schools.close <- as.Date("2020-03-05") #Schools closed
   SiP.start <- as.Date("2020-03-15")     #SiP announced
-  SiP2 <- as.Date("2020-04-15")          #Another knot
-  SiP3 <- as.Date("2020-05-15")          #Another knot
-  SiP4 <- Sys.Date()                     #Another knot
+  SiP.cont <- as.Date("2020-05-01")      #Another knot
+  today <- Sys.Date()                     #Another knot
   
   t.end <- as.Date("2020-07-15")         # Where we're headed (for future use)
 
-  t.tot <- as.numeric(SiP4 - t0)
+  t.tot <- as.numeric(t.end - t0)
   dt <- 1
   
+  beta_time <- cbind(-as.numeric(t0-c(t0, schools.close,
+                                      SiP.start, SiP.cont, today,t.end)),
+                     c(1, 1, 0.6, 0.4, 0.5, 0.7))
+  
+  beta_smooth <- splinefun(x = beta_time[2:6,1],
+                           y = beta_time[2:6,2],
+                           method = "natural")
+
+  beta_fx <- approxfun(c(1:t.tot),
+                       c(rep(1,beta_time[2,1]), sapply(c(beta_time[2,1]+1):t.tot,
+                                                       beta_smooth)))
+  
+plot(c(1:t.tot), sapply(1:t.tot, beta_fx), type = "l")
+  points(x = beta_time[,1],
+         y = beta_time[,2],
+         pch = 17, col = "red")
+
 # Infection status through time
   inf.mat <- matrix(data = NA, nrow = N, ncol = t.tot/dt)
 
@@ -43,8 +58,8 @@ devtools::load_all("CMH/ABM/")
   t.til.nxt <- matrix(data = NA, nrow = N, ncol = t.tot/dt)
   
 # Initial conditions
-  e.seed <- 2     #Exposed
-  ip.seed <- 0    #infected pre-symptomatic
+  e.seed <- 10     #Exposed
+  ip.seed <- 5    #infected pre-symptomatic
   ia.seed <- 0    #infected asymptomatic
   im.seed <- 0    #infected mildly symptomatic
   imh.seed <- 0   #infected mildly symptomatic, will become severe
@@ -79,7 +94,7 @@ init.infection <- sample(c(rep("E", e.seed),
     } else if(i == "Ih"){
       t_sevsymp()
     } else {
-      0
+      NA
     }
   })
 
@@ -108,6 +123,7 @@ for(t in 2:(t.tot/dt)){
     }
 
 # Simulate infection
+  beta_t <- beta_fx(t)  
   new.Es <- sim.infection(inf.mat[,t], risks, beta_t)
     
   # Update infection status matrix with new Es  
@@ -123,3 +139,4 @@ for(t in 2:(t.tot/dt)){
   # On to the next one  
 }
  
+test <- sum_inf_mat(inf.mat)

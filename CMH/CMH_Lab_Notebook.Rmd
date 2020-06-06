@@ -202,6 +202,13 @@ Another set of questions revolves around what exactly we want the trigger to rep
 * For a given trigger, what are the key Epi metrics at some date in the future?  
 * Two different levels of Re, 1.1 or 1.4 starting June 15th, different testing metrics for implementing trigger  
 
+# 6/5/2020  
+Think I have a good approach to this testing as an early warning system question, borrowed in large part from Jacob's document on hospital admissions as an early warning. I'll start by fitting a deterministic, continuous time model to hospitalizations and deaths data to get a better hold on a few parameters and the current $\mathcal{R}_e$. Then I'll use the same parameters to forecast transmission with a stochastic continuous time model in `adaptivetau` under different future transmission scenarios (e.g. $\mathcal{R}_e$ increases to 1.1 or 1.4). I'll then take those simulations and determine if/when hospitals are overwhelmed and if/when the hospitalizations-based trigger is "tripped". Finally, I'll use different testing scenarios to determine if/when a testing-based trigger could be implemented and if it can pick up on a signal before the hospitalizations trigger does.
+
+Spent a lot of time getting the model to fit properly to get a handle on parameters, but now am reasonably confident to move forward with next steps. Also did some simple plotting to compare true testing data to modeled incidence and there may be something there as both %positive tests and modeled incidence have been decreasing at a similar pace for the last month or so.
+
+Have the stochastic model simulations working properly, they pick up where the deterministic model leaves off to simulate into the future stochastically. Next is to get testing on top of these simulations to work. Taking a random sample at each time step leads to extremely low positive test rates, so need to introduce sampling weights such that %pos tests matches data
+
 # ABM TODOs  
 ## Network TODOs  
 * Inform random network generation with individual characteristics, e.g. some individuals more "social": higher probability of generating random edges. Currently implemented with `r.net.prob`, but should introduce heterogeneity based on other characteristics rather than have it generated randomly  

@@ -7,6 +7,7 @@ output: pdf_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE,
+                      message = FALSE,
                       fig.height = 6,
                       fig.width = 8)
 
@@ -15,7 +16,10 @@ require(tidyverse)
 
 ```
 
-```{r epi_date}
+# Purpose  
+Evaluate potential triggers to intervene on COVID transmission (e.g. shelter in place or other method to reduce contact and transmission) from signals in testing data. 
+
+```{r epi_data}
 # Case and hosptialization data for SF
 sf_hosp <- read.csv(url("https://data.sfgov.org/resource/nxjg-bhem.csv")) %>% 
   mutate(Date = as.Date(reportdate),
@@ -62,10 +66,12 @@ sf_all <- sf_test %>%
 
 ## Testing  
 ```{r test_plot}
-test_plot <- sf_test %>% 
+sf_test_plot_df <- sf_test %>% 
   mutate(tests_1k = tests/10000) %>% 
   dplyr::select(Date, tests_1k, pct) %>% 
-  pivot_longer(-Date, names_to = "Test", values_to = "Num") %>% 
+  pivot_longer(-Date, names_to = "Test", values_to = "Num")
+
+test_plot <- sf_test_plot_df %>% 
   ggplot() +
     geom_line(aes(x = Date, y = Num, col = Test),
               size = 1.1) +
@@ -102,7 +108,7 @@ We use a slight tweak to LEMMA to add an explicit deaths compartment in order to
 \dot{R}&=\gamma_R I_R \gamma_H(1-\mu)H\\
 \end{align*}
 
-```{r mod_prep}
+```{r mod_prep, include=FALSE}
 # Key Dates
 t0 <- as.Date("2020-02-15")
 
@@ -111,38 +117,27 @@ schools.close <- as.Date("2020-03-05") #Schools closed
 SiP.start <- as.Date("2020-03-15")     #SiP announced
 SiP2 <- as.Date("2020-04-15")          #Another knot
 SiP3 <- as.Date("2020-05-15")          #Another knot
-SiP4 <- Sys.Date()                     #Another knot
-
+today <- Sys.Date()                    #Another knot today
 t.end <- as.Date("2020-07-15")         # Where we're headed (for future use)
 
-beta.time <- cbind(-as.numeric(t0-c(t0, schools.close,
-                                    SiP.start, SiP2, SiP3, SiP4,t.end)),
-                   c(1, 1, 0.5, 0.3, 0.5, 0.6, 0.7))
+t.tot <- as.numeric(t.end - t0)
 
-beta_smooth <- splinefun(x = beta.time[,1],
-                         y = beta.time[,2],
-                         method = "natural")
+# Transmission parameter estimates
+get_R <- function(beta, alpha, gam_r, gam_h, S, N){
+  ((beta*(1-alpha))/gam_r + (beta*alpha)/gam_h)*S/N
+}
 
-beta_smooth2 <- approxfun(x = beta.time[,1],
-                          y = beta.time[,2],
-                          method = "linear")
-
-plot(c(1:150), sapply(1:150, beta_smooth), type = "l")
-  lines(c(1:150), sapply(1:150, beta_smooth2), col = 4)
-  points(x = beta.time[,1],
-         y = beta.time[,2],
-         pch = 17, col = "red")
-
-pop.size <- 883305
-t.sim <- as.numeric(SiP4 - t0)
-
-# Was having trouble fitting model with t0 as march 1st, not enough time for infection to build up before movement tanks, so adding some time to ramp up
+get_beta <- function(R, alpha, gam_r, gam_h){
+  (R*gam_r*gam_h)/((1-alpha)*gam_h+alpha*gam_r*gam_h)
+}
 
 #Starting covid parameters
+pop.size <- 883305
+t.sim <- as.numeric(today - t0)
+
 lemma_pars <- list(N = pop.size,
                    t.sim = t.sim,
                    E.start = 2,
-                   beta = 0.7,
                    cr = 1,
                    ch = 1,
                    sigma = 1/3,
@@ -152,37 +147,30 @@ lemma_pars <- list(N = pop.size,
                    gam_h = 1/12,
                    mu = 0.2)
 
-get_R <- function(beta, rel_beta, alpha, gam_r, gam_h, S, N){
-  ((beta*rel_beta*(1-alpha))/gam_r + (beta*rel_beta*alpha)/gam_h)*S/N
-}
+beta.init <- get_beta(3, lemma_pars[["alpha"]], lemma_pars[["gam_r"]], lemma_pars[["rho"]])
 
-base_R <- get_R(lemma_pars[["beta"]], 1,
-                lemma_pars[["alpha"]], lemma_pars[["rho"]], lemma_pars[["gam_h"]], 1, 1)
-```
+beta.time <- cbind(-as.numeric(t0-c(t0, schools.close,
+                                    SiP.start, SiP2, SiP3, today, t.end)),
+                   log(beta.init*c(1, 1, 0.6, 0.4, 0.5, 0.5, 0.7)))
 
-```{r par_table, dev="tikz" }
-tab1 <- data.frame(val = as.character(round(as.numeric(lemma_pars), 3)), 
-                   des = c("population size",
-                           "time to run simulation",
-                           "starting number of exposed",
-                           "baseline transmission rate",
-                           "Relative contact rate between S and Ir",
-                           "Relative contact rate between S and Ih",
-                           "1/serial interval",
-                           "proportion severely symptomatic (will be hospitalized)",
-                           "time between symptom onset and hospitalization",
-                           "1/time to recovery (non-infectiousness) for mildly symptomatic",
-                           "1/time hospitalized",
-                           "proportion of hospitalized cases who die"))
+beta_smooth <- splinefun(x = beta.time[,1],
+                         y = beta.time[,2],
+                         method = "natural")
 
-rownames(tab1) <- c("$N$", "t.sim", "$E_0$",  "$\\beta$","$c_r$","$c_h$",
-                    "$\\sigma$","$\\alpha$", "$\\rho$", 
-                    "$\\gamma_r$","$\\gamma_h$","$\\mu$")
+beta_fx <- approxfun(c(1:t.tot),
+                     c(rep(log(beta.init),beta.time[2,1]), sapply(c(beta.time[2,1]+1):t.tot,
+                                                                  beta_smooth)))
 
-knitr::kable(tab1, row.names = TRUE, 
-             col.names = c("Value", "Definition"), 
-             format = "latex", escape = FALSE, 
-             caption = "Parameter values and descriptions used in the model")
+beta_smooth2 <- approxfun(x = beta.time[,1],
+                          y = beta.time[,2],
+                          method = "linear")
+
+plot(c(1:150), exp(sapply(1:150, beta_fx)), type = "l")
+  lines(c(1:150), exp(sapply(1:150, beta_smooth2)), col = 4)
+  points(x = beta.time[,1],
+         y = exp(beta.time[,2]),
+         pch = 17, col = "red")
+
 ```
 
 ```{r mod_odes}
@@ -199,7 +187,6 @@ lemma_odes = function(t, n, p, fx) {
   
   # Parameters
     N = p[['N']]             #population size
-    beta = p[['beta']]       #transmission rate
     cr = p[['cr']]           #Relative contact rate between S and Ir
     ch = p[['ch']]           #Relative contact rate between S and Ih
     sigma = p[['sigma']]     #1/serial interval
@@ -210,12 +197,12 @@ lemma_odes = function(t, n, p, fx) {
     mu = p[['mu']]           #proportion of hospitalized cases who die
 
   #Movement forcing function
-    rel_beta = fx(t)
+    beta = exp(fx(t))
   
   # Model equations
-    dSdt = -S*beta*rel_beta*(Ir*cr+Ih*ch)/N
+    dSdt = -S*beta*(Ir*cr+Ih*ch)/N
     
-    dEdt = S*beta*rel_beta*(Ir*cr+Ih*ch)/N - E*sigma
+    dEdt = S*beta*(Ir*cr+Ih*ch)/N - E*sigma
     
     dIrdt = E*(1-alpha)*sigma - Ir*gam_r
     
@@ -223,18 +210,17 @@ lemma_odes = function(t, n, p, fx) {
 
     dHdt = Ih*rho - H*gam_h
     
-    dDdt = H*mu*gam_h
+    dDdt = H*gam_h*mu
     
-    dRdt = Ir*gam_r+Ih*gam_h*(1-mu)
+    dRdt = Ir*gam_r+H*gam_h*(1-mu)
 
     return(list(c(dSdt, dEdt, dIrdt, dIhdt, dHdt, dDdt, dRdt)))
     
 } 
 ```
 
-```{r test_fit}
+```{r test_fit, eval=FALSE}
 test.pars <- lemma_pars
-test.pars[["beta"]] <- 0.7
 test.pars[["E.start"]] <- 2
 
   init <- c(S = test.pars[["N"]] - test.pars[["E.start"]],
@@ -250,11 +236,11 @@ test.sim <- as.data.frame(ode(y = init,
                               times = 1:test.pars[["t.sim"]], 
                               parms = test.pars,
                               func = lemma_odes, 
-                              fx = beta_smooth2)) %>% 
+                              fx = beta_fx)) %>% 
   mutate(Date = as.Date(t0+time-1)) 
 
-test.sim$Re <- get_R(test.pars[["beta"]], sapply(1:test.pars[["t.sim"]], beta_smooth),
-                     test.pars[["alpha"]], test.pars[["rho"]], test.pars[["gam_h"]], test.sim$S, test.pars[["N"]])
+test.sim$Re <- get_R(exp(sapply(1:test.pars[["t.sim"]], beta_fx)),
+                     test.pars[["alpha"]], test.pars[["gam_r"]], test.pars[["rho"]], test.sim$S, test.pars[["N"]])
 
 
 ggplot() +
@@ -304,26 +290,30 @@ ggplot() +
 
 ```
 
+
 ```{r fit_fx}
-#Function to return "fit" from input parameters and data
+#Function to return fit from input parameters and data
   lemma_fit <- function(fit.pars, all.pars, fit_data) {
     use.pars <- all.pars
-    use.pars[["beta"]] <- fit.pars[2]
     use.pars[["alpha"]] <- fit.pars[3]
     use.pars[["mu"]] <- fit.pars[4]
         
-    beta_smooth <- approxfun(x = beta.time[1:6,1],
-                             y = c(1, 
-                                   fit.pars[5],
-                                   fit.pars[6],
-                                   fit.pars[7],
-                                   fit.pars[8],
-                                   fit.pars[9]),
-                             method = "linear")
+    beta_smooth <- splinefun(x = beta.time[2:6,1],
+                             y = log(c(fit.pars[2],
+                                       fit.pars[5],
+                                       fit.pars[6],
+                                       fit.pars[7],
+                                       fit.pars[8])),
+                             method = "natural")
   
+    beta_fx <- approxfun(c(1:use.pars[["t.sim"]]),
+                         c(log(rep(fit.pars[2],beta.time[2,1])), 
+                           sapply(c(beta.time[2,1]+1):use.pars[["t.sim"]],
+                                  beta_smooth)))
+
     # initial number of exposed as parameter
-    init <- c(S = use.pars[["N"]] - fit.pars[1],
-              E = fit.pars[1],
+    init <- c(S = as.numeric(use.pars[["N"]] - fit.pars[1]),
+              E = as.numeric(fit.pars[1]),
               Ir = 0,
               Ih = 0,
               H = 0,
@@ -335,7 +325,7 @@ ggplot() +
                                  times = 1:use.pars[["t.sim"]], 
                                  parms = use.pars,
                                  func = lemma_odes, 
-                                 fx = beta_smooth)) %>% 
+                                 fx = beta_fx)) %>% 
       mutate(Date = as.Date(t0+(time-1)))
     
     # Join simulated and observed data
@@ -343,7 +333,7 @@ ggplot() +
       full_join(fit_data, by = "Date")
     
     ## Calculate the log likelihood (logLike) of the data given theta (parameter set)
-  	hosp.sse <- (mod.obs.dat$HOSP_CONF - mod.obs.dat$H)^2 
+  	hosp.sse <- (mod.obs.dat$HOSP_CONF+mod.obs.dat$ICU_CONF - mod.obs.dat$H)^2 
   	mort.sse <- (mod.obs.dat$D - mod.obs.dat$cum_death)^2
 
   	return(sum(hosp.sse+mort.sse, na.rm = T))
@@ -351,21 +341,23 @@ ggplot() +
 
 ```
 
-
+## Model fit  
 ```{r fit, eval = FALSE}
 iterations <- 1000
 
 set.seed(430)
 
-prop.pars <- cbind(E.start = rnbinom(iterations, mu = 3, size = 20)+1,
-                   beta = rbeta(iterations, 4, 2),
-                   alpha = rbeta(iterations, 1,5),
-                   mu = rbeta(iterations, 2, 6),
-                   db1 = rbeta(iterations, 4, 2),
-                   db2 = rbeta(iterations, 2, 2),
-                   db3 = rbeta(iterations, 2, 2),
-                   db4 = rbeta(iterations, 2, 2),
-                   db5 = rbeta(iterations, 3, 2))
+E.start = rnbinom(iterations, mu = 3, size = 30)+1
+beta = rbeta(iterations, 4, 2)
+alpha = rbeta(iterations, 2,40)
+mu = rbeta(iterations, 3, 12)
+db1 = beta*rbeta(iterations, 4, 2)       # Change in transmission from school closure to SiP
+db2 = db1*rbeta(iterations, 4, 2)        # Change in transmission 4-15
+db3 = db2*(1-rnorm(iterations, 0, 0.2))  # Change in transmission 5-15
+db4 = db3*(1-rnorm(iterations, 0, 0.1))  # Change in transmission today
+
+prop.pars <- cbind(E.start, beta, alpha, mu,
+                   db1, db2, db3, db4)
 
 lemma_sweeps <- as.list(data.frame(t(prop.pars)))
 
@@ -381,19 +373,28 @@ lemma_rslts <- cbind(prop.pars, t(data.frame(lemma_fits)))
 ```
 
 ```{r fit_parallel, eval = FALSE}
-iterations <- 250000
+iterations <- 80000
 
 set.seed(430)
 
-prop.pars <- cbind(E.start = rnbinom(iterations, mu = 3, size = 20)+1,
-                   beta = rbeta(iterations, 4, 2),
-                   alpha = rbeta(iterations, 1,5),
-                   mu = rbeta(iterations, 2, 6),
-                   db1 = rbeta(iterations, 4, 2),
-                   db2 = rbeta(iterations, 2, 2),
-                   db3 = rbeta(iterations, 2, 2),
-                   db4 = rbeta(iterations, 2, 2),
-                   db5 = rbeta(iterations, 3, 2))
+E.start = rnbinom(iterations, mu = 3, size = 30)+1
+beta = rbeta(iterations, 4, 2)
+alpha = rbeta(iterations, 2,40)
+mu = rbeta(iterations, 3, 12)
+db1 = beta*rbeta(iterations, 4, 2)       # Change in transmission from school closure to SiP
+db2 = db1*rbeta(iterations, 4, 2)        # Change in transmission 4-15
+db3 = db2*(1-rnorm(iterations, 0, 0.2))  # Change in transmission 5-15
+db4 = db3*(1-rnorm(iterations, 0, 0.1))  # Change in transmission today
+
+prop.pars <- cbind(E.start, beta, alpha, mu,
+                   db1, db2, db3, db4)
+
+as.data.frame(prop.pars) %>% 
+  pivot_longer(E.start:db4, names_to = "Par") %>% 
+  ggplot() +
+    geom_density(aes(value, fill = Par), alpha = 0.5) +
+    facet_wrap(Par~., ncol = 4, nrow = 2,
+               scales = "free")
 
 lemma_sweeps <- as.list(data.frame(t(prop.pars)))
 
@@ -420,40 +421,145 @@ stopCluster(opclust)
 lemma_rslts <- cbind(prop.pars, t(data.frame(lemma_fits)))
 
 saveRDS(lemma_rslts, 
-        "LEMMA_ODE_sweeps_6-4-20.rds")
+        "LEMMA_ODE_sweeps_6-5-20.rds")
 ```
 
-```{r plot_best}
-lemma_rslts <- readRDS("LEMMA_ODE_sweeps_6-4-20.rds")
+```{r improve_fit, eval = FALSE}
+lemma_rslts <- readRDS("LEMMA_ODE_sweeps_6-5-20.rds")
+
+#Function to return fit from input log parameters and data
+  lemma_fit_log <- function(fit.pars, all.pars, fit_data) {
+    use.pars <- all.pars
+    use.pars[["alpha"]] <- exp(fit.pars[3])
+    use.pars[["mu"]] <- exp(fit.pars[4])
+    
+    beta_smooth <- splinefun(x = beta.time[2:6,1],
+                             y = log(exp(c(fit.pars[2],
+                                           fit.pars[5],
+                                           fit.pars[6],
+                                           fit.pars[7],
+                                           fit.pars[8]))),
+                             method = "natural")
+  
+    beta_fx <- approxfun(c(1:use.pars[["t.sim"]]),
+                         c(log(rep(exp(fit.pars[2]),beta.time[2,1])), 
+                           sapply(c(beta.time[2,1]+1):use.pars[["t.sim"]],
+                                  beta_smooth)))
+
+    # initial number of exposed as parameter
+    init <- c(S = use.pars[["N"]] - exp(fit.pars[1]),
+              E = exp(fit.pars[1]),
+              Ir = 0,
+              Ih = 0,
+              H = 0,
+              D = 0,
+              R = 0)
+    
+    # Run the model with input parameters to generate predicted quantities
+    mod.run <- as.data.frame(ode(y = init, 
+                                 times = 1:use.pars[["t.sim"]], 
+                                 parms = use.pars,
+                                 func = lemma_odes, 
+                                 fx = beta_fx)) %>% 
+      mutate(Date = as.Date(t0+(time-1)))
+    
+    # Join simulated and observed data
+    mod.obs.dat <- mod.run %>% 
+      full_join(fit_data, by = "Date")
+    
+    ## Calculate the log likelihood (logLike) of the data given theta (parameter set)
+  	hosp.sse <- (mod.obs.dat$HOSP_CONF+mod.obs.dat$ICU_CONF - mod.obs.dat$H)^2 
+  	mort.sse <- (mod.obs.dat$D - mod.obs.dat$cum_death)^2
+
+  	return(sum(hosp.sse+mort.sse, na.rm = T))
+  }
+
+best_pt <- optim(par = log(lemma_rslts[which(lemma_rslts[,9] == min(lemma_rslts[,9])),][-9]),
+                 fn = lemma_fit_log,
+                 all.pars = lemma_pars,
+                 fit_data = sf_all,
+                 method = "L-BFGS-B",
+                 lower = log(c(1, 1e-2, 1e-2, 1e-2,1e-2,1e-2,1e-2,1e-2)),
+                 upper = log(c(15, 0.9, 0.3, 0.3,1,1,1,1)),
+                 control = list(maxit = 1000,
+                                trace = 1))
+
+best_pt_pars <- exp(best_pt$par)
+
+saveRDS(best_pt_pars, "LEMMA_ODE_best_fit_pars_6-5-20.rds")
+```
+
+
+```{r sim_best, include = FALSE}
+best_pt_pars <- readRDS("LEMMA_ODE_best_fit_pars_6-5-20.rds")
 
 best.pars <- lemma_pars
-best.pars[["beta"]] <- as.numeric(lemma_rslts[,2][which(lemma_rslts[,10] == min(lemma_rslts[,10]))])
-best.pars[["alpha"]] <- as.numeric(lemma_rslts[,3][which(lemma_rslts[,10] == min(lemma_rslts[,10]))])
-best.pars[["mu"]] <- as.numeric(lemma_rslts[,4][which(lemma_rslts[,10] == min(lemma_rslts[,10]))])
-best.pars[["E.start"]] <- as.numeric(lemma_rslts[,1][which(lemma_rslts[,10] == min(lemma_rslts[,10]))])
+best.pars[["E.start"]] <- as.numeric(best_pt_pars[1])
+best.pars[["alpha"]] <- as.numeric(best_pt_pars[3])
+best.pars[["mu"]] <- as.numeric(best_pt_pars[4])
 
-  init <- c(S = best.pars[["N"]] - best.pars[["E.start"]],
-            E = best.pars[["E.start"]],
+  init <- c(S = as.numeric(best.pars[["N"]] - round(best.pars[["E.start"]])),
+            E = as.numeric(round(best.pars[["E.start"]])),
             Ir = 0,
             Ih = 0,
             H = 0,
             D = 0,
             R = 0)
-
-best_smooth <- approxfun(x = beta.time[1:6,1],
-                         y = c(1,as.numeric(lemma_rslts[which(lemma_rslts[,10] == min(lemma_rslts[,10])),5:9])),
-                         method = "linear")
-
   
+  best_spline <- splinefun(x = beta.time[1:6,1],
+                           y = log(c(best_pt_pars[2],best_pt_pars[2],
+                                     as.numeric(best_pt_pars[5:8]))),
+                           method = "natural")
+  
+  best_smooth <- approxfun(c(1:best.pars[["t.sim"]]),
+                           c(rep(log(best_pt_pars[2]),beta.time[2,1]), 
+                             sapply(c(beta.time[2,1]+1):best.pars[["t.sim"]],
+                                    best_spline)),
+                           method = "constant")
+
+plot(c(1:best.pars[["t.sim"]]), exp(sapply(1:best.pars[["t.sim"]], best_smooth)), 
+     type = "l")
+  points(x = beta.time[1:6,1],
+         y = c(best_pt_pars[2],best_pt_pars[2],
+                   as.numeric(best_pt_pars[5:8])),
+         pch = 17, col = "red")
+```
+
+```{r best_pars, dev="tikz" }
+tab1 <- data.frame(val = as.character(round(as.numeric(best.pars), 3)), 
+                   des = c("population size",
+                           "time to run simulation",
+                           "starting number of exposed",
+                           "Relative contact rate between S and Ir",
+                           "Relative contact rate between S and Ih",
+                           "1/serial interval",
+                           "proportion severely symptomatic (will be hospitalized)",
+                           "time between symptom onset and hospitalization",
+                           "1/time to recovery (non-infectiousness) for mildly symptomatic",
+                           "1/time hospitalized",
+                           "proportion of hospitalized cases who die"))
+
+rownames(tab1) <- c("$N$", "t.sim", "$E_0$" ,"$c_r$","$c_h$",
+                    "$\\sigma$","$\\alpha$", "$\\rho$", 
+                    "$\\gamma_r$","$\\gamma_h$","$\\mu$")
+
+knitr::kable(tab1, row.names = TRUE, 
+             col.names = c("Value", "Definition"), 
+             format = "latex", escape = FALSE, 
+             caption = "Best fit model parameters")
+```
+
+```{r plot_best}
 best.sim <- as.data.frame(ode(y = init, 
                               times = 1:best.pars[["t.sim"]], 
                               parms = best.pars,
                               func = lemma_odes, 
                               fx = best_smooth)) %>% 
-  mutate(Date = as.Date(t0+time-1)) 
+  mutate(Date = as.Date(t0+time-1),
+         I_tot = Ir+Ih) 
 
-best.sim$Re <- get_R(best.pars[["beta"]], sapply(1:best.pars[["t.sim"]], best_smooth),
-                     best.pars[["alpha"]], best.pars[["rho"]], best.pars[["gam_h"]], best.sim$S, best.pars[["N"]])
+best.sim$Re <- get_R(exp(sapply(1:best.pars[["t.sim"]], best_smooth)),
+                     best.pars[["alpha"]], best.pars[["gam_r"]], best.pars[["rho"]], best.sim$S, best.pars[["N"]])
 
 ggplot() +
   theme_bw() +
@@ -466,10 +572,12 @@ ggplot() +
             aes(x = Date, y = H),
             col = "coral", size = 1.2) +
   geom_point(data = sf_all,
-             aes(x = Date, y = HOSP_CONF),
+             aes(x = Date, y = HOSP_CONF+ICU_CONF),
              pch = 17) +
   scale_x_date(date_labels = "%m/%d", 
-               date_breaks = "7 day")
+               date_breaks = "7 day") +
+  labs(x = "Date", y = "Hospitalizations",
+       title = "Model fit to SF hospitalizations")
 
 ggplot() +
   theme_bw() +
@@ -485,7 +593,9 @@ ggplot() +
              aes(x = Date, y = cum_death),
              pch = 17) +
   scale_x_date(date_labels = "%m/%d", 
-               date_breaks = "7 day")
+               date_breaks = "7 day") +
+  labs(x = "Date", y = "Cumulative deaths",
+       title = "Model fit to SF deaths")
 
 ggplot() +
   theme_bw() +
@@ -498,7 +608,309 @@ ggplot() +
             aes(x = Date, y = Re),
             col = "coral", size = 1.2) +
   scale_x_date(date_labels = "%m/%d", 
-               date_breaks = "7 day")
+               date_breaks = "7 day") +
+  scale_y_continuous(breaks = seq(0,3.5,0.5),
+                     limits = c(0,4)) +
+  labs(x = "Date", y = expression(R[e]),
+       title = "Best fit effective reproduction number")
 
+```
+
+### Comparison to testing data  
+```{r comp_test}
+sf_test_p_inc <- rbind(sf_test_plot_df,
+      best.sim %>% 
+        mutate(Test = "Cases/100",
+               Num = I_tot/best.pars[["N"]]*100) %>% 
+        dplyr::select(Date,Test,Num))
+
+sf_test_p_inc %>% 
+  ggplot() +
+    geom_line(aes(x = Date, y = Num, col = Test),
+              size = 1.1) +
+    theme_bw() +
+    scale_color_manual(values = c("darkblue", "purple", "gold"),
+                       labels = c("Cases/100",
+                                  "%+",
+                                  "Tests (10,000s)")) +
+    scale_x_date(date_labels = "%m/%d", 
+               date_breaks = "7 day") +
+    theme(axis.title = element_text(size = 14,
+                                    face = "bold"),
+          axis.text = element_text(size = 12),
+          axis.text.x = element_text(angle = 45,
+                                     hjust = 1)) +
+    labs(x = "Date", y = "",
+         title = "SF COVID testing and modeled cases",
+         col = "")
+
+```
+
+
+```{r}
+sf_test_p_inc %>% 
+  filter(Date >= as.Date("2020-04-20")) %>% 
+  ggplot() +
+    stat_smooth(aes(x = Date, y = Num, col = Test),
+                method = "loess", span = 0.5) +
+    theme_bw() +
+    scale_color_manual(values = c("darkblue", "purple", "gold"),
+                       labels = c("Cases/100",
+                                  "%+",
+                                  "Tests (10,000s)")) +
+    scale_x_date(date_labels = "%m/%d", 
+                 date_breaks = "7 day",
+                 limits = c(as.Date("2020-05-01"), today)) +
+    theme(axis.title = element_text(size = 14,
+                                    face = "bold"),
+          axis.text = element_text(size = 12),
+          axis.text.x = element_text(angle = 45,
+                                     hjust = 1)) +
+    labs(x = "Date", y = "",
+         title = "SF COVID testing and modeled cases",
+         col = "")
+  
+```
+
+
+## Model forecast  
+
+```{r sim.extended, eval = FALSE}
+spline_ext <- splinefun(x = beta.time[,1],
+                        y = as.numeric(log(c(best_pt_pars[2],best_pt_pars[2],
+                                  as.numeric(best_pt_pars[5:8]), 
+                                  get_beta(1.4, best_pt_pars[3], 
+                                           best.pars[["gam_r"]], best.pars[["rho"]])))),
+                        method = "natural")
+
+smooth_ext <- approxfun(c(0:t.tot),
+                        c(rep(log(best_pt_pars[2]),beta.time[2,1]), 
+                          sapply(c(beta.time[2,1]+1):(t.tot+1),
+                                 spline_ext)))
+
+
+sim.ext <- as.data.frame(ode(y = init, 
+                             times = 1:t.tot, 
+                             parms = best.pars,
+                             func = lemma_odes, 
+                             fx = smooth_ext)) %>% 
+  mutate(Date = as.Date(t0+time-1)) 
+
+sim.ext$Re <- get_R(exp(sapply(1:t.tot, smooth_ext)),
+                    best.pars[["alpha"]], best.pars[["gam_r"]], best.pars[["rho"]], 
+                    sim.ext$S, best.pars[["N"]])
+
+ggplot() +
+  theme_bw() +
+  theme(axis.title = element_text(size = 14,
+                                  face = "bold"),
+        axis.text = element_text(size = 12),
+        axis.text.x = element_text(angle = 45,
+                                   hjust = 1)) +
+  geom_line(data = sim.ext,
+            aes(x = Date, y = H),
+            col = "coral", size = 1.2) +
+  geom_point(data = sf_all,
+             aes(x = Date, y = HOSP_CONF+ICU_CONF),
+             pch = 17) +
+  scale_x_date(date_labels = "%m/%d", 
+               date_breaks = "7 day",
+               limits = c(as.Date("2020-02-15"), t.end))
+
+ggplot() +
+  theme_bw() +
+  theme(axis.title = element_text(size = 14,
+                                  face = "bold"),
+        axis.text = element_text(size = 12),
+        axis.text.x = element_text(angle = 45,
+                                   hjust = 1)) +
+  geom_line(data = sim.ext,
+            aes(x = Date, y = D),
+            col = "coral", size = 1.2) +
+  geom_point(data = sf_all,
+             aes(x = Date, y = cum_death),
+             pch = 17) +
+  scale_x_date(date_labels = "%m/%d", 
+               date_breaks = "7 day",
+               limits = c(as.Date("2020-02-15"), t.end))
+
+ggplot() +
+  theme_bw() +
+  theme(axis.title = element_text(size = 14,
+                                  face = "bold"),
+        axis.text = element_text(size = 12),
+        axis.text.x = element_text(angle = 45,
+                                   hjust = 1)) +
+  geom_line(data = sim.ext,
+            aes(x = Date, y = Re),
+            col = "coral", size = 1.2) +
+  scale_x_date(date_labels = "%m/%d", 
+               date_breaks = "7 day",
+               limits = c(as.Date("2020-02-15"), t.end)) +
+  scale_y_continuous(breaks = seq(0,3.5,0.5),
+                     limits = c(0,4))
+
+```
+
+```{r adaptau_mod}
+library(adaptivetau)
+
+# List of transitions
+transitions = list(
+  c(S = -1, E = 1),     #Susceptible becomes exposed
+  c(E = -1, Ir = 1),    #Exposed becomes Infected, will recover
+  c(E = -1, Ih = 1),    #Exposed becomes Infected, will be hospitalized
+  c(Ir = -1, R = 1),    #Infected, mild recovers
+  c(Ih = -1, H = 1),    #Infected severe becomes hospitalized
+  c(H = -1, D = 1),     #Hospitalized, becomes Dead
+  c(H = -1, R = 1))     #Hospitalized becomes recovered
+
+# Rate simulator
+rates_base <- function(x, p, t, fx) {
+  S = x['S']
+  E = x['E']
+  Ir = x['Ir']
+  Ih = x['Ih']
+  H = x['H']
+  R = x['R']
+  D = x["D"]
+
+  # Parameters
+    N = p[['N']]             #population size
+    beta =future_beta(t)     #transmission rate
+    cr = p[['cr']]           #Relative contact rate between S and Ir
+    ch = p[['ch']]           #Relative contact rate between S and Ih
+    sigma = p[['sigma']]     #1/serial interval
+    alpha = p[['alpha']]     #proportion severely symptomatic
+    rho = p[['rho']]         #1/time between symptom onset and hospitalization
+    gam_r = p[['gam_r']]     #1/time to recovery (non-infectiousness) for mild/asymptomatic
+    gam_h = p[['gam_h']]     #1/time to removed (recovered or deceased) for hospitalized
+    mu = p[['mu']]           #proportion of hospitalized cases who die
+  
+  return(c(S*beta*(Ir*cr+Ih*ch)/N, #Susceptible becomes exposed
+           E*(1-alpha)*sigma,      #Exposed becomes Infected, pre-symptomatic
+           E*alpha*sigma,          #Exposed becomes Infected, asymptomatic
+           Ir*gam_r,               #Infected, pre-symptomatic becomes Infected, severe
+           Ih*rho,                 #Infected, pre-symptomatic becomes Infected, mild
+           H*mu*gam_h,             #Hospitalized becomes Dead
+           H*(1-mu)*gam_h))        #Hospitalized becomes recovered
+}
+
+#Function to simulate and return dataframe
+stoch.sim = function(init, trans, rates, pars, t_sim){
+  
+  ssa.sim <- adaptivetau::ssa.adaptivetau(init.values = init, 
+                                          transitions = trans,
+                                          rateFunc = rates,
+                                          params = pars,
+                                          tf=t_sim)
+  
+  return(ssa.sim)
+}  
+
+```
+
+```{r r14_sims}
+#Starting conditions from today
+init_6.3.20 <- as.numeric(round(best.sim[dim(best.sim)[1]-1, 2:8]))
+names(init_6.3.20) <- colnames(best.sim[2:8])
+  
+#Function for future beta conditions
+end.date <- as.Date("2020-08-01")
+t.future <- as.numeric(end.date - as.Date("2020-06-03"))
+
+new.Re <- 1.4 
+new.beta <- get_beta(new.Re, best.pars[["alpha"]], 
+                     best.pars[["gam_r"]], best.pars[["rho"]])
+t_til_new_beta <- 7
+future_beta <- approxfun(c(0, t_til_new_beta,t.future),
+                           c(best_pt_pars[8], new.beta, new.beta),
+                           method = "linear")
+
+
+future_runs <- bind_rows(lapply(1:100, function(i){
+  as.data.frame(stoch.sim(init = init_6.3.20, 
+                          trans = transitions, 
+                          rates = rates_base,
+                          pars = best.pars,
+                          t_sim = t.future)) %>% 
+    mutate(sim = i,
+           datetime = as.POSIXct(sf_test$result_date[94])+(time*86400))
+  }))
+
+```
+
+```{r r14_sims_plot}
+ggplot() +
+  theme_bw() +
+  theme(axis.title = element_text(size = 14,
+                                  face = "bold"),
+        axis.text = element_text(size = 12),
+        axis.text.x = element_text(angle = 45,
+                                   hjust = 1)) +
+  geom_line(data = best.sim,
+            aes(x = as.POSIXct(Date), y = H),
+            col = "coral", size = 1.2) +
+  geom_point(data = sf_all,
+             aes(x = as.POSIXct(Date), y = HOSP_CONF+ICU_CONF),
+             pch = 17)  +
+  geom_line(data = future_runs,
+            aes(x = datetime, y = H, group = as.factor(sim)),
+            size = 0.2, col = "grey50", alpha = 0.6) +
+  labs(x = "Date", y = "Hospitalizations",
+       title = paste("Future Hospitalizations projections with \nRe reaching ", 
+                     new.Re, " in ", t_til_new_beta, " days\nand remaining until",
+                     end.date))
+
+```
+
+```{r stoch_tests, eval=FALSE}
+rates_test <- function(x, p, t, fx) {
+  S = x['S']
+  E = x['E']
+  Ir = x['Ir']
+  Ih = x['Ih']
+  H = x['H']
+  R = x['R']
+  D = x["D"]
+  
+  tested <- sample(c(rep("S", x["S"]),
+                     rep("E", x["E"]),
+                     rep("Ir", x["Ir"]),
+                     rep("Ih", x["Ih"]),
+                     rep("H", x["H"]),
+                     rep("R", x["R"])),
+                   1600)
+  
+  tested_pos <- sum(tested %in% c("Ir", "Ih", "H"))/sum(x)
+  
+  #print(tested_pos)
+  
+  # Parameters
+    N = p[['N']]             #population size
+    beta =future_beta(t)     #transmission rate
+    cr = p[['cr']]           #Relative contact rate between S and Ir
+    ch = p[['ch']]           #Relative contact rate between S and Ih
+    sigma = p[['sigma']]     #1/serial interval
+    alpha = p[['alpha']]     #proportion severely symptomatic
+    rho = p[['rho']]         #1/time between symptom onset and hospitalization
+    gam_r = p[['gam_r']]     #1/time to recovery (non-infectiousness) for mild/asymptomatic
+    gam_h = p[['gam_h']]     #1/time to removed (recovered or deceased) for hospitalized
+    mu = p[['mu']]           #proportion of hospitalized cases who die
+  
+  return(c(S*beta*(Ir*cr+Ih*ch)/N, #Susceptible becomes exposed
+           E*(1-alpha)*sigma,      #Exposed becomes Infected, pre-symptomatic
+           E*alpha*sigma,          #Exposed becomes Infected, asymptomatic
+           Ir*gam_r,               #Infected, pre-symptomatic becomes Infected, severe
+           Ih*rho,                 #Infected, pre-symptomatic becomes Infected, mild
+           H*mu*gam_h,             #Hospitalized becomes Dead
+           H*(1-mu)*gam_h))        #Hospitalized becomes recovered
+}
+
+stoch.sim(init = init_6.3.20, 
+          trans = transitions, 
+          rates = rates_test,
+          pars = best.pars,
+          t_sim = t.future)
 ```
 
