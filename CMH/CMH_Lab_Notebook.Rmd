@@ -209,6 +209,12 @@ Spent a lot of time getting the model to fit properly to get a handle on paramet
 
 Have the stochastic model simulations working properly, they pick up where the deterministic model leaves off to simulate into the future stochastically. Next is to get testing on top of these simulations to work. Taking a random sample at each time step leads to extremely low positive test rates, so need to introduce sampling weights such that %pos tests matches data
 
+# 6/7/2020  
+Working on figuring out reasonable sampling weights to include in model simulations to match observed testing data. Going to assume that all new hospital cases (hospital admissions) are tested and confirmed positive. Then I'll match testing of active cases and susceptibles/exposed to observed number of positive cases. This leads to a bias estimate with a median around 45, which seems to have held steady over the past month or so as tests also stabilized around 1600 per day, so will use those numbers in simulations. Basically took the stochastic model runs and simulated testing on top of them to get estimates of the percent positive tests in the different transmission scenarios. This is taking awhile to run because of the sampling, so running it overnight.
+
+# 6/8/2020  
+Have a decent framework for identifying when a testing trigger should be implemented, now just need to work out how to implement it in the models. Because the sampling step takes so long, any model where the sampling is done at every time step is going to take a very long time to run. Was able to find code for a faster random sampling function, but it still takes a long time to run. Think the next step is to have a conversation about whether a reliable trigger can actually come from testing data and if so what it is. Could at the very least compare a testing trigger to a hospital admissions trigger.  
+
 # ABM TODOs  
 ## Network TODOs  
 * Inform random network generation with individual characteristics, e.g. some individuals more "social": higher probability of generating random edges. Currently implemented with `r.net.prob`, but should introduce heterogeneity based on other characteristics rather than have it generated randomly  
