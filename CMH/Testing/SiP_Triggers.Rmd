@@ -1112,7 +1112,7 @@ clusterExport(test_cl, c("future_runs_Hadm",
 
 clusterEvalQ(test_cl, require(tidyverse))
 
-stoch_sim_tests <- parApply(test_cl, future_runs_Hadm %>% drop_na() %>% filter(sim < 21), 1, 
+stoch_sim_tests <- parApply(test_cl, future_runs_Hadm %>% drop_na(), 1, 
                             function(t){
                               t <- as.numeric(t)
                               
@@ -1140,7 +1140,7 @@ saveRDS(stoch_sim_tests,
 ```{r plot_stoch_sims_test14}
 stoch_sim_tests <- readRDS("future_stoch_runs_tests_Re14_6-7-20.rds")
 
-future_runs_tests_sum <- as.data.frame(cbind(future_runs_Hadm %>% drop_na() %>% filter(sim < 21),
+future_runs_tests_sum <- as.data.frame(cbind(future_runs_Hadm %>% drop_na(),
                                            sim_pct_pos = stoch_sim_tests)) %>% 
   arrange(time) %>% 
   mutate(sim_pos = round(sim_pct_pos*tests_use),
