@@ -9,7 +9,7 @@
 #' @export
 #'        
 
-t_latent <- function(shape.l=11, scale.l=2){
+t_latent <- function(shape.l=9, scale.l=1.5){
   rgamma(1, shape.l, scale.l)
 } 
       
@@ -216,4 +216,67 @@ new_infection <- function(contact.mat, inf.ind, inf.multiplier){
   }
                    
   return(new.Es)
+}
+
+#' @title ABM Test
+#' 
+#' @description Test individuals with different sampling weights. TODO: Implement testing uncertainty, esp. with regards to time since being infected
+#' 
+#' @param inf.states vector of individual infection states
+#' @param test.prior vector of prior testing statuses
+#' @param test.probs vector of sampling weights corresponding to S, E, Ip, Ia, Im, Imh, Ih, and R classes, in that order
+#' @param n.tests numeric of number of tests conducted
+#' 
+#' @return vector of NAs and Ts with Ts corresponding to individuals who tested positive
+#' @export
+#' 
+
+test_folks <- function(inf.states, test.prior, test.probs, n.tests){
+  weights <- as.numeric(replace(inf.states, 
+                                c("S", "E", "Ip", "Ia", "Im", "Imh", "Ih", "R"), 
+                                test.probs)[inf.states])
+
+  weights[!is.na(test.prior)] <- 0
+  weights[is.na(weights)] <- 0
+  
+  tested <- weighted_Random_Sample(1:length(inf.states),
+                                   weights,
+                                   n.tests)
+  
+  pos.tests <- tested[which(inf.states[tested] %in% c("Ip", "Ia", "Im", "Imh", "Ih"))]
+  
+  test.prior[pos.tests] <- paste0(inf.states[pos.tests], "T")
+  
+  return(test.prior)
+}
+
+#' @title ABM quarantine
+#' 
+#' @description Quarantine individuals based on their test and infection status
+#' 
+#' @param inf.vec vector of individual infection states
+#' @param test.vec vector of individual testing status
+#' @param q.prob vector of individual probabilities of being quarantined
+#' 
+#' @return vector of NAs and Ts with Ts corresponding to individuals who tested positive
+#' @export
+#' 
+
+quarantine <- function(inf.vec, test.vec, q.prob){
+  #Indices of individuals who are infected with symptoms  
+  infection.indices <- which(inf.vec %in% c("Im", "Imh"))
+  
+  #Indices of individuals who have been tested and identified as infectious 
+  tested.indices <- which(!is.na(test.vec))
+
+  poss_q <- unique(c(infection.indices, tested.indices))
+
+  #Bernoulli trial for those with symptoms and those tested on whether they'll quarantine
+  q10 <- rep(0, length(inf.vec))
+  qs <- sapply(q.prob[poss_q], function(p){ rbinom(1,1,p) })
+  
+  q10[poss_q] <- qs
+  
+  # Return binary vector with q=1 for those who will quarantine
+  return(q10)
 }

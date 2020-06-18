@@ -70,4 +70,3 @@ sym_mat <- function(mat){
 #' @export
 
 `%!in%` <- Negate(`%in%`)
-
