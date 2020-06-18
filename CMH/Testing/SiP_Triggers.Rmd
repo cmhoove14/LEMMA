@@ -1,5 +1,5 @@
 ---
-title: "Shelter in Place Triggers"
+title: "COVID Testing Bias and Influence on Projected Testing metrics"
 author: "Chris Hoover"
 date: "6/4/2020"
 output: pdf_document
@@ -8,16 +8,21 @@ output: pdf_document
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE,
                       message = FALSE,
+                      warning = FALSE,
                       fig.height = 6,
                       fig.width = 8)
 
+require(parallel)
 require(deSolve)
+require(wrswoR)
+require(zoo)
 require(tidyverse)
+devtools::load_all("../ABM")
 
 ```
 
 # Purpose  
-Evaluate potential triggers to intervene on COVID transmission (e.g. shelter in place or other method to reduce contact and transmission) from signals in testing data. 
+Estimate bias in COVID19 testing in SF and incorporate into near-term projections to determine influence on testing metrics such as %+ tests. 
 
 ```{r epi_data}
 # Case and hosptialization data for SF
@@ -42,7 +47,7 @@ sf_hosp <- read.csv(url("https://data.sfgov.org/resource/nxjg-bhem.csv")) %>%
          cumHOSPpui = cumsum(HOSP_PUI))
 
 sf_case <- read.csv(url("https://data.sfgov.org/resource/tvq9-ec9w.csv")) %>% 
-  mutate(Date = as.Date(date)) %>% 
+  mutate(Date = as.Date(specimen_collection_date)) %>% 
   pivot_wider(names_from = case_disposition,
               values_from = case_count) %>% 
   group_by(Date) %>% 
@@ -53,7 +58,7 @@ sf_case <- read.csv(url("https://data.sfgov.org/resource/tvq9-ec9w.csv")) %>%
          cum_death = cumsum(Deaths))
 
 sf_test <- read.csv(url("https://data.sfgov.org/resource/nfpa-mg4g.csv")) %>% 
-  mutate(Date = as.Date(result_date)) %>% 
+  mutate(Date = as.Date(specimen_collection_date)) %>% 
   arrange(Date) %>% 
   mutate(cum_tests = cumsum(tests),
          cum_pos = cumsum(pos))
@@ -114,13 +119,15 @@ We use a slight tweak to LEMMA to add an explicit deaths compartment in order to
 ```{r mod_prep, include=FALSE}
 # Key Dates
 t0 <- as.Date("2020-02-15")
+last_dat <- max(sf_all %>% na.omit() %>% pull(Date))
+today <- Sys.Date()
 
 # Beta change dates
-schools.close <- as.Date("2020-03-05") #Schools closed
-SiP.start <- as.Date("2020-03-15")     #SiP announced
-SiP2 <- as.Date("2020-04-15")          #Another knot
-SiP3 <- as.Date("2020-05-15")          #Another knot
-today <- as.Date(Sys.Date()-1)         #Another knot today
+db1 <- as.Date("2020-03-05") #Schools closed
+db2 <- as.Date("2020-03-15")     #SiP announced
+db3 <- as.Date("2020-04-15")          #Another knot
+db4 <- as.Date("2020-05-15")          #Another knot
+last_fit <- last_dat-7
 t.end <- as.Date("2020-07-15")         # Where we're headed (for future use)
 
 t.tot <- as.numeric(t.end - t0)
@@ -136,7 +143,7 @@ get_beta <- function(R, alpha, gam_r, gam_h){
 
 #Starting covid parameters
 pop.size <- 883305
-t.sim <- as.numeric(today - t0)
+t.sim <- as.numeric(last_fit - t0)
 
 lemma_pars <- list(N = pop.size,
                    t.sim = t.sim,
@@ -152,8 +159,8 @@ lemma_pars <- list(N = pop.size,
 
 beta.init <- get_beta(3, lemma_pars[["alpha"]], lemma_pars[["gam_r"]], lemma_pars[["rho"]])
 
-beta.time <- cbind(-as.numeric(t0-c(t0, schools.close,
-                                    SiP.start, SiP2, SiP3, today, t.end)),
+beta.time <- cbind(-as.numeric(t0-c(t0, db1,
+                                    db2, db3, db4, last_fit, t.end)),
                    log(beta.init*c(1, 1, 0.6, 0.4, 0.5, 0.5, 0.7)))
 
 beta_smooth <- splinefun(x = beta.time[,1],
@@ -168,8 +175,8 @@ beta_smooth2 <- approxfun(x = beta.time[,1],
                           y = beta.time[,2],
                           method = "linear")
 
-plot(c(1:150), exp(sapply(1:150, beta_fx)), type = "l")
-  lines(c(1:150), exp(sapply(1:150, beta_smooth2)), col = 4)
+plot(c(1:t.tot), exp(sapply(1:t.tot, beta_fx)), type = "l")
+  lines(c(1:t.tot), exp(sapply(1:t.tot, beta_smooth2)), col = 4)
   points(x = beta.time[,1],
          y = exp(beta.time[,2]),
          pch = 17, col = "red")
@@ -222,77 +229,6 @@ lemma_odes = function(t, n, p, fx) {
 } 
 ```
 
-```{r test_fit, eval=FALSE}
-test.pars <- lemma_pars
-test.pars[["E.start"]] <- 2
-
-  init <- c(S = test.pars[["N"]] - test.pars[["E.start"]],
-            E = test.pars[["E.start"]],
-            Ir = 0,
-            Ih = 0,
-            H = 0,
-            D = 0,
-            R = 0)
-
-
-test.sim <- as.data.frame(ode(y = init, 
-                              times = 1:test.pars[["t.sim"]], 
-                              parms = test.pars,
-                              func = lemma_odes, 
-                              fx = beta_fx)) %>% 
-  mutate(Date = as.Date(t0+time-1)) 
-
-test.sim$Re <- get_R(exp(sapply(1:test.pars[["t.sim"]], beta_fx)),
-                     test.pars[["alpha"]], test.pars[["gam_r"]], test.pars[["rho"]], test.sim$S, test.pars[["N"]])
-
-
-ggplot() +
-  theme_bw() +
-  theme(axis.title = element_text(size = 14,
-                                  face = "bold"),
-        axis.text = element_text(size = 12),
-        axis.text.x = element_text(angle = 45,
-                                   hjust = 1)) +
-  geom_line(data = test.sim,
-            aes(x = Date, y = H),
-            col = "coral", size = 1.2) +
-  geom_point(data = sf_all,
-             aes(x = Date, y = HOSP_tot),
-             pch = 17) +
-  scale_x_date(date_labels = "%m/%d", 
-               date_breaks = "7 day")
-
-ggplot() +
-  theme_bw() +
-  theme(axis.title = element_text(size = 14,
-                                  face = "bold"),
-        axis.text = element_text(size = 12),
-        axis.text.x = element_text(angle = 45,
-                                   hjust = 1)) +
-  geom_line(data = test.sim,
-            aes(x = Date, y = D),
-            col = "coral", size = 1.2) +
-  geom_point(data = sf_all,
-             aes(x = Date, y = cum_death),
-             pch = 17) +
-  scale_x_date(date_labels = "%m/%d", 
-               date_breaks = "7 day")
-  
-ggplot() +
-  theme_bw() +
-  theme(axis.title = element_text(size = 14,
-                                  face = "bold"),
-        axis.text = element_text(size = 12),
-        axis.text.x = element_text(angle = 45,
-                                   hjust = 1)) +
-  geom_line(data = test.sim,
-            aes(x = Date, y = Re),
-            col = "coral", size = 1.2) +
-  scale_x_date(date_labels = "%m/%d", 
-               date_breaks = "7 day")
-
-```
-
 ## Model fit  
 
 ```{r fit_fx}
@@ -343,93 +279,6 @@ ggplot() +
   	return(sum(hosp.sse+mort.sse, na.rm = T))
   }
 
-```
-
-```{r fit, eval = FALSE}
-iterations <- 1000
-
-set.seed(430)
-
-E.start = rnbinom(iterations, mu = 3, size = 30)+1
-beta = rbeta(iterations, 4, 2)
-alpha = rbeta(iterations, 2,40)
-mu = rbeta(iterations, 3, 12)
-db1 = beta*rbeta(iterations, 4, 2)       # Change in transmission from school closure to SiP
-db2 = db1*rbeta(iterations, 4, 2)        # Change in transmission 4-15
-db3 = db2*(1-rnorm(iterations, 0, 0.2))  # Change in transmission 5-15
-db4 = db3*(1-rnorm(iterations, 0, 0.1))  # Change in transmission today
-
-prop.pars <- cbind(E.start, beta, alpha, mu,
-                   db1, db2, db3, db4)
-
-lemma_sweeps <- as.list(data.frame(t(prop.pars)))
-
-start <- Sys.time()
-lemma_fits <- lapply(lemma_sweeps, lemma_fit,
-                     lemma_pars, sf_all)
-end <- Sys.time()
-
-end-start
-
-lemma_rslts <- cbind(prop.pars, t(data.frame(lemma_fits)))
-
-```
-
-```{r fit_parallel, eval = FALSE}
-iterations <- 100000
-
-set.seed(430)
-
-E.start = rnbinom(iterations, mu = 3, size = 30)+1
-beta = rbeta(iterations, 4, 2)
-alpha = rbeta(iterations, 2,40)
-mu = rbeta(iterations, 3, 12)
-db1 = beta*rbeta(iterations, 4, 2)       # Change in transmission from school closure to SiP
-db2 = db1*rbeta(iterations, 4, 2)        # Change in transmission 4-15
-db3 = db2*(1-rnorm(iterations, 0, 0.2))  # Change in transmission 5-15
-db4 = db3*(1-rnorm(iterations, 0, 0.1))  # Change in transmission today
-
-prop.pars <- cbind(E.start, beta, alpha, mu,
-                   db1, db2, db3, db4)
-
-as.data.frame(prop.pars) %>% 
-  pivot_longer(E.start:db4, names_to = "Par") %>% 
-  ggplot() +
-    geom_density(aes(value, fill = Par), alpha = 0.5) +
-    facet_wrap(Par~., ncol = 4, nrow = 2,
-               scales = "free")
-
-lemma_sweeps <- as.list(data.frame(t(prop.pars)))
-
-require(parallel)
-opclust <- makeCluster(detectCores())         # Make cluster
-clusterExport(opclust, c("lemma_sweeps",
-                         "lemma_pars", 
-                         "lemma_fit",
-                         "sf_all",
-                         "lemma_odes",
-                         "beta.time",
-                         "t0"))         # Export objects to cluster
-
-clusterEvalQ(opclust, {
-  library(deSolve)
-  library(tidyverse)
-})
-
-lemma_fits <- parLapply(opclust, lemma_sweeps, lemma_fit, 
-                        lemma_pars, sf_all)
-
-stopCluster(opclust)
-
-lemma_rslts <- cbind(prop.pars, t(data.frame(lemma_fits)))
-
-saveRDS(lemma_rslts, 
-        "LEMMA_ODE_sweeps_6-7-20.rds")
-```
-
-```{r improve_fit, eval = FALSE}
-lemma_rslts <- readRDS("LEMMA_ODE_sweeps_6-7-20.rds")
-
 #Function to return fit from input log parameters and data
   lemma_fit_log <- function(fit.pars, all.pars, fit_data) {
     use.pars <- all.pars
@@ -477,26 +326,113 @@ lemma_rslts <- readRDS("LEMMA_ODE_sweeps_6-7-20.rds")
   	return(sum(hosp.sse+mort.sse, na.rm = T))
   }
 
+```
+
+```{r fit, eval = FALSE}
+iterations <- 1000
+
+set.seed(430)
+
+E.start = rnbinom(iterations, mu = 3, size = 30)+1
+beta = rbeta(iterations, 4, 2)
+alpha = rbeta(iterations, 2,40)
+mu = rbeta(iterations, 3, 12)
+db1 = beta*rbeta(iterations, 4, 2)       # Change in transmission from school closure to SiP
+db2 = db1*rbeta(iterations, 4, 2)        # Change in transmission 4-15
+db3 = db2*(1-rnorm(iterations, 0, 0.2))  # Change in transmission 5-15
+db4 = db3*(1-rnorm(iterations, 0, 0.1))  # Change in transmission at last data point
+
+prop.pars <- cbind(E.start, beta, alpha, mu,
+                   db1, db2, db3, db4)
+
+lemma_sweeps <- as.list(data.frame(t(prop.pars)))
+
+start <- Sys.time()
+lemma_fits <- lapply(lemma_sweeps, lemma_fit,
+                     lemma_pars, sf_all)
+end <- Sys.time()
+
+end-start
+
+lemma_rslts <- cbind(prop.pars, t(data.frame(lemma_fits)))
+
+```
+
+```{r fit_parallel, eval = FALSE}
+iterations <- 10000
+
+set.seed(430)
+
+E.start = rnbinom(iterations, mu = 3, size = 30)+1
+beta = rbeta(iterations, 4, 2)
+alpha = runif(iterations, 0.02, 0.04)
+mu = runif(iterations, 0.08, 0.14)
+db1 = beta*rbeta(iterations, 4, 2)       # Change in transmission from school closure to SiP
+db2 = db1*rbeta(iterations, 4, 2)        # Change in transmission 4-15
+db3 = db2*(1-rnorm(iterations, 0, 0.2))  # Change in transmission 5-15
+db4 = db3*(1-rnorm(iterations, 0, 0.2))  # Change in transmission at last data point
+
+prop.pars <- cbind(E.start, beta, alpha, mu,
+                   db1, db2, db3, db4)
+
+as.data.frame(prop.pars) %>% 
+  pivot_longer(E.start:db4, names_to = "Par") %>% 
+  ggplot() +
+    geom_density(aes(value, fill = Par), alpha = 0.5) +
+    facet_wrap(Par~., ncol = 4, nrow = 2,
+               scales = "free")
+
+lemma_sweeps <- as.list(data.frame(t(prop.pars)))
+
+require(parallel)
+opclust <- makeCluster(detectCores())         # Make cluster
+clusterExport(opclust, c("lemma_sweeps",
+                         "lemma_pars", 
+                         "lemma_fit",
+                         "sf_all",
+                         "lemma_odes",
+                         "beta.time",
+                         "t0"))         # Export objects to cluster
+
+clusterEvalQ(opclust, {
+  library(deSolve)
+  library(tidyverse)
+})
+
+lemma_fits <- parLapply(opclust, lemma_sweeps, lemma_fit, 
+                        lemma_pars, sf_all)
+
+stopCluster(opclust)
+
+lemma_rslts <- cbind(prop.pars, t(data.frame(lemma_fits)))
+
+saveRDS(lemma_rslts, 
+        "LEMMA_ODE_sweeps_6-15-20.rds")
+```
+
+```{r improve_fit, eval = FALSE}
+lemma_rslts <- readRDS("LEMMA_ODE_sweeps_6-15-20.rds")
+
 best_pt <- optim(par = log(lemma_rslts[which(lemma_rslts[,9] == min(lemma_rslts[,9])),][-9]),
                  fn = lemma_fit_log,
                  all.pars = lemma_pars,
                  fit_data = sf_all,
                  method = "L-BFGS-B",
-                 lower = log(c(1, 1e-2, 1e-2, 1e-2,1e-2,1e-2,1e-2,1e-2)),
-                 upper = log(c(15, 0.9, 0.3, 0.3,1,1,1,1)),
+                 lower = log(c(1, 1e-2, 0.02, 0.08,1e-2,1e-2,1e-2,1e-2)),
+                 upper = log(c(15, 0.9, 0.04, 0.14,1,1,1,1)),
                  control = list(maxit = 1000,
                                 trace = 1))
 
 best_pt_pars <- exp(best_pt$par)
 
-saveRDS(best_pt_pars, "LEMMA_ODE_best_fit_pars_6-7-20.rds")
+saveRDS(best_pt_pars, "LEMMA_ODE_best_fit_pars_6-15-20.rds")
 ```
 
 ```{r sim_best, include = FALSE}
-best_pt_pars <- readRDS("LEMMA_ODE_best_fit_pars_6-7-20.rds")
+best_pt_pars <- readRDS("LEMMA_ODE_best_fit_pars_6-15-20.rds")
 
 best.pars <- lemma_pars
-best.pars[["E.start"]] <- as.numeric(best_pt_pars[1])
+best.pars[["E.start"]] <- round(as.numeric(best_pt_pars[1]))
 best.pars[["alpha"]] <- as.numeric(best_pt_pars[3])
 best.pars[["mu"]] <- as.numeric(best_pt_pars[4])
 
@@ -571,7 +507,8 @@ ggplot() +
         axis.text.x = element_text(angle = 45,
                                    hjust = 1)) +
   geom_col(data = sf_all,
-             aes(x = Date, y = HOSP_CONF+ICU_CONF)) +
+             aes(x = Date, y = HOSP_CONF+ICU_CONF),
+           col = "black", fill = "grey50") +
   geom_line(data = best.sim,
             aes(x = Date, y = H),
             col = "coral", size = 1.2) +
@@ -588,7 +525,8 @@ ggplot() +
         axis.text.x = element_text(angle = 45,
                                    hjust = 1)) +
   geom_col(data = sf_all,
-             aes(x = Date, y = cum_death)) +
+             aes(x = Date, y = cum_death),
+           col = "black", fill = "grey50") +
   geom_line(data = best.sim,
             aes(x = Date, y = D),
             col = "coral", size = 1.2) +
@@ -611,6 +549,7 @@ ggplot() +
                date_breaks = "7 day") +
   scale_y_continuous(breaks = seq(0,3.5,0.5),
                      limits = c(0,4)) +
+  geom_hline(yintercept = 1, lty = 2) +
   labs(x = "Date", y = expression(R[e]),
        title = "Best fit effective reproduction number")
 
@@ -689,6 +628,8 @@ sf_test_mod_join %>%
 Assume all new hospitalized cases are tested and confirmed positive, then assume remaining tests are allocated to non-hospitalized population. In the model, this is equivalent to a sample of $S$, $E$, and $I_r+I_h$. In reality, lots of nuance in the $E$ and $R$ compartments with regard to testing, but for simplicity, we'll assume positive tests from this sample only come from $I_r+I_h$ and $R$s are not tested. So want to solve for sampling bias, $\mathcal{B}$, from:
 $$\frac{+Tests-H_{new}}{Tests-H_{new}}=\frac{\mathcal{B}(I_r+I_h)}{S+E+I_r+I_h}$$
 
+where $\mathcal{B}$ can be roughly interpreted as the enhanced probability of infectious individuals being tested
+
 ```{r mod_test_match, fig.cap="Distribution of estimated sampling bias since end of April"}
 sf_test_mod_join_samp_bias <- sf_test_mod_join %>% 
   mutate(tests_100_avg = tests_7dayavg/100,
@@ -704,28 +645,49 @@ boxplot(sf_test_mod_join_samp_bias %>%
           pull(bias),
         ylab = "Bias")
 
+bias_median <- median(sf_test_mod_join_samp_bias %>% 
+                        filter(Date >= as.Date("2020-04-30")) %>% 
+                        pull(bias), na.rm = T)
+
 ```
 
 ```{r bias_through_time}
-sf_test_mod_join_samp_bias %>% 
+sf_test_bias <- sf_test_mod_join_samp_bias %>% 
+  mutate(bias_7dayavg = zoo::rollmean(bias, 7, fill = NA)) %>% 
   filter(Date >= (as.Date("2020-03-15"))) %>% 
-  mutate(bias_7dayavg = zoo::rollmean(bias, 7, 
-                                      na.pad = T, align = "right")) %>% 
   ggplot() +
     geom_line(aes(x = Date, y = bias_7dayavg),
               size = 1.1) +
     theme_bw() +
     scale_x_date(date_labels = "%m/%d", 
                date_breaks = "7 day") +
-    scale_y_continuous(breaks = c(25,50,75,100,125),
-                       limits = c(25,125)) +
+    scale_y_continuous(breaks = c(0, 25,50,75,100,125, 150),
+                       limits = c(0,150)) +
     theme(axis.title = element_text(size = 14,
                                     face = "bold"),
           axis.text = element_text(size = 12),
           axis.text.x = element_text(angle = 45,
                                      hjust = 1)) +
-    labs(x = "Date", y = "Testing bias",
+    labs(x = "Date", y = "Testing bias (7-day average)",
          title = "SF COVID testing bias through time")
+
+sf_test_bias
+```
+
+
+```{r sf_covid_testing_bias_and_numbers}
+sf_test <- sf_test %>% 
+  mutate(tests_p100k = (tests/pop.size)*1e5,
+         tests_p100k_smooth = rollmean(tests_p100k, 7, fill = NA, align = "left"))
+
+sf_test_bias +
+  geom_line(data = sf_test,
+            aes(x = Date, y = tests_p100k_smooth), 
+            col = "purple", size = 1.2) +
+    ylim(c(0,300)) +
+    labs(x = "Date", y = "Tests/100k and bias (7-day average)",
+         title = "SF COVID Testing Numbers and Estimated Bias")
+  
 
 ```
 
@@ -734,13 +696,14 @@ sf_test_mod_join_samp_bias %>%
 #Simulate biased testing of modeled data
 test_with_bias <- function(p_tests, n_tests, mod_I, mod_H, mod_SE){
   B <- (p_tests-round(mod_H))/(n_tests-round(mod_H))*(mod_SE/mod_I)
-  t_samp <- sample(c(rep(0, mod_SE),
-                     rep(1, mod_I)),
-                   n_tests-round(mod_H),
-                   prob = c(rep(1, mod_SE),
-                            rep(B, mod_I)))
+  I <- c(rep(0, mod_SE), rep(1, mod_I))
   
-  pct_pos <- sum(t_samp)/(n_tests-round(mod_H))
+  t_samp <- sample_int_crank(length(I),
+                             n_tests-round(mod_H),
+                             prob = c(rep(1, mod_SE),
+                                      rep(B, mod_I)))
+  
+  pct_pos <- sum(I[t_samp])/(n_tests-round(mod_H))
   
   return(pct_pos)
 }
@@ -767,12 +730,11 @@ for(i in 1:n_sim_tests){
 }
 
 saveRDS(sim_tests_mat,
-        "sim_test_pct_pos_6-7-20.rds")
+        "sim_test_pct_pos_6-15-20.rds")
 ```
 
-
 ```{r test_mod_pct_comp}
-sim_tests_mat <- readRDS("sim_test_pct_pos_6-7-20.rds")
+sim_tests_mat <- readRDS("sim_test_pct_pos_6-15-20.rds")
 
 sim_tests_pos_med <- apply(sim_tests_mat, 1, median)
 sim_tests_75th <- apply(sim_tests_mat, 1, quantile, 0.75)
@@ -794,10 +756,17 @@ as.data.frame(cbind(sf_test_mod_join_samp_bias %>%
          title = "Comparison of simulated and observed test positive rates adjusting for bias")
 ```
 
+This is ok as the most recent test positive rates (which are lower) are in the lower left of this plot where the simulation and observed match better. Higher observed test positive rates were earlier in the outbreak when less tests were avaialble and testing bias was probably even more sporadic.
 
 ## Model forecast  
 
-```{r sim.extended, eval = FALSE}
+Assuming testing bias and number of tests remain constant, now want to determine what testing (and hospitalizations since that is what model fitting is based on) may look like in the near future under different transmission scenarios. The model was fit through the first week of June (June 5th), and the different transmission scenarios assume:  
+
+1. Transmission has remained constant with $\mathcal{R}_e\approx0.8$  
+2. Transmission has increased above 1 as of June 15th with $\mathcal{R}_e\approx1.1$  
+3. Transmission has increased well above 1 as of June 15th with $\mathcal{R}_e\approx1.4$  
+
+```{r sim_extended_setup}
 spline_ext <- splinefun(x = beta.time[,1],
                         y = as.numeric(log(c(best_pt_pars[2],best_pt_pars[2],
                                   as.numeric(best_pt_pars[5:8]), 
@@ -810,7 +779,10 @@ smooth_ext <- approxfun(c(0:t.tot),
                           sapply(c(beta.time[2,1]+1):(t.tot+1),
                                  spline_ext)))
 
+proj_tests_per_day = 2200
+```
 
+```{r sim.extended, eval = FALSE}
 sim.ext <- as.data.frame(ode(y = init, 
                              times = 1:t.tot, 
                              parms = best.pars,
@@ -987,38 +959,24 @@ names(init_Hadm) <- c(colnames(best.sim[2:7]), "Rr", "Rh")
 
 ```
 
+### $\mathcal{R}_e\rightarrow0.8$  
 
-### $\mathcal{R}_e\rightarrow1.4$  
-
-```{r stoch_sims_setup}
+```{r stoch_sims_setup_Re08}
 #Function for future beta conditions
-end.date <- as.Date("2020-08-01")
-t.future <- as.numeric(end.date - as.Date("2020-06-03"))
+t.future <- as.numeric(t.end - last_fit)
 
-new.Re <- 1.4 
+new.Re <- 0.8 
 new.beta <- get_beta(new.Re, best.pars[["alpha"]], 
                      best.pars[["gam_r"]], best.pars[["rho"]])
 t_til_new_beta <- 7
-future_beta <- approxfun(c(0, t_til_new_beta,t.future),
-                           c(best_pt_pars[8], new.beta, new.beta),
-                           method = "linear")
+future_beta <- approxfun(c(0, t_til_new_beta,t.future), c(best_pt_pars[8], new.beta, new.beta), method = "linear")
 
 ```
 
-```{r r14_sims, eval = FALSE}
-future_runs <- bind_rows(lapply(1:100, function(i){
-  as.data.frame(stoch.sim(init = init_today, 
-                          trans = transitions, 
-                          rates = rates_base,
-                          pars = best.pars,
-                          t_sim = t.future)) %>% 
-    mutate(sim = i,
-           dt = time-lag(time),
-           tests = round(dt*1600),
-           datetime = as.POSIXct(sf_test$result_date[94])+(time*86400))
-  }))
+```{r r08_sims, eval = FALSE}
+set.seed(430)
 
-future_runs_Hadm <- bind_rows(lapply(1:100, function(i){
+future_runs_Hadm_Re08 <- bind_rows(lapply(1:100, function(i){
   as.data.frame(stoch.sim(init = init_Hadm, 
                           trans = transitions_Hadm, 
                           rates = rates_Hadm,
@@ -1026,16 +984,52 @@ future_runs_Hadm <- bind_rows(lapply(1:100, function(i){
                           t_sim = t.future)) %>% 
     mutate(sim = i,
            dt = time-lag(time),
-           tests = round(dt*1600),
-           datetime = as.POSIXct(sf_test$result_date[94])+(time*86400))
+           tests = round(dt*proj_tests_per_day),
+           datetime = as.POSIXct(sf_test %>% 
+                                   filter(Date == last_fit) %>% 
+                                   pull(specimen_collection_date))+(time*86400))
   }))
 
-saveRDS(future_runs_Hadm,
-        "future_stoch_runs_Hadm_Re14_6-7-20.rds")
+saveRDS(future_runs_Hadm_Re08, 
+        "future_stoch_runs_Re08_6-15-20.rds")
+
 ```
 
-```{r r14_sims_plot}
-future_runs_Hadm <- readRDS("future_stoch_runs_Hadm_Re14_6-7-20.rds")
+```{r r08_sims_plot, message = FALSE}
+future_runs_Hadm_Re08 <- readRDS("future_stoch_runs_Re08_6-15-20.rds")
+
+re08_stoch_sum <- future_runs_Hadm_Re08 %>% 
+  arrange(time) %>% 
+  mutate(time_cut = cut(time, breaks = c(0:t.end))) %>% 
+  group_by(time_cut) %>% 
+  summarise(S_med = median(S),
+            S25th = quantile(S, 0.25),
+            S75th = quantile(S, 0.75),
+            E_med = median(E),
+            E25th = quantile(E, 0.25),
+            E75th = quantile(E, 0.75),
+            Ia_med = median(Ir),
+            Ir25th = quantile(Ir, 0.25),
+            Ir75th = quantile(Ir, 0.75),
+            Is_med = median(Ih),
+            Ih25th = quantile(Ih, 0.25),
+            Ih75th = quantile(Ih, 0.75),
+            H_med = median(H),
+            H25th = quantile(H, 0.25),
+            H75th = quantile(H, 0.75),
+            Rr_med = median(Rr),
+            Rr25th = quantile(Rr, 0.25),
+            Rr75th = quantile(Rr, 0.75),
+            D_med = median(D),
+            D25th = quantile(D, 0.25),
+            D75th = quantile(D, 0.75),
+            Rh_med = median(Rh),
+            Rh25th = quantile(Rh, 0.25),
+            Rh75th = quantile(Rh, 0.75),
+            tests = sum(tests)/max(future_runs_Hadm_Re08$sim)) %>% 
+  mutate(time = as.numeric(time_cut),
+         Date = last_fit+time-2,
+         Re = 0.8)
 
 ggplot() +
   theme_bw() +
@@ -1045,22 +1039,24 @@ ggplot() +
         axis.text.x = element_text(angle = 45,
                                    hjust = 1)) +
   geom_col(data = sf_all,
-           aes(x = as.POSIXct(Date), y = HOSP_CONF+ICU_CONF))  +
+           aes(x = Date, y = HOSP_CONF+ICU_CONF),
+           col = "black", fill = "grey60")  +
   geom_line(data = best.sim,
-            aes(x = as.POSIXct(Date), y = H),
+            aes(x = Date, y = H),
             col = "coral", size = 1.2) +
-  geom_line(data = future_runs_Hadm,
-            aes(x = datetime, y = H, group = as.factor(sim)),
-            size = 0.2, col = "grey50", alpha = 0.6) +
+  geom_ribbon(data = re08_stoch_sum,
+              aes(x = Date, ymin = H25th, ymax = H75th),
+              fill = "red", alpha = 0.3) +
+  geom_line(data = re08_stoch_sum,
+            aes(x = Date, y = H_med),
+            size = 1.2, col = "red") +
   labs(x = "Date", y = "Hospitalizations",
-       title = paste("Projected Hospital Census with \nRe reaching ", 
-                     new.Re, " in ", t_til_new_beta, " days\nand remaining until",
-                     end.date))
+       title = "Hospitalizations projection with Re->0.8")
 
 ```
 
-```{r plot_stoch_sims_Hadm14, include = FALSE}
-future_runs_Hadm <- future_runs_Hadm %>% 
+```{r plot_stoch_sims_Hadm08, include = FALSE}
+future_runs_Hadm_Re08 <- future_runs_Hadm_Re08 %>% 
   group_by(sim) %>% 
   mutate(dH = H - lag(H),
          dRh = Rh - lag(Rh),
@@ -1071,48 +1067,17 @@ future_runs_Hadm <- future_runs_Hadm %>%
          tests_use = if_else(tests_noH < 1, NA_real_, tests_noH),
          Date = as.Date(datetime))
 
-future_runs_Hadm %>% 
-  drop_na() %>% 
-  group_by(Date,sim) %>% 
-  summarise(H_adm = sum(newH, na.rm = T)) %>% 
-  filter(Date != as.Date("2020-08-01")) %>%
-  ggplot() +
-    theme_bw() +
-    theme(axis.title = element_text(size = 14,
-                                    face = "bold"),
-          axis.text = element_text(size = 12),
-          axis.text.x = element_text(angle = 45,
-                                     hjust = 1)) +
-  geom_line(aes(x = Date, y = H_adm, group = as.factor(sim)),
-            size = 0.2, col = "grey50", alpha = 0.6) +
-  labs(x = "Date", y = "Hospital admissions",
-       title = paste("Projected Hospital Admissions with \nRe reaching ", 
-                     new.Re, " in ", t_til_new_beta, " days\nand remaining until",
-                     end.date))
-
 ```
 
-
-```{r future_test_pos, eval = FALSE}
-# Function from here to speed up random sampling w/o replacement: https://stackoverflow.com/questions/15113650/faster-weighted-sampling-without-replacement 
-weighted_Random_Sample <- function(
-    .data,
-    .weights,
-    .n
-    ){
-
-    key <- runif(length(.data)) ^ (1 / .weights)
-    return(.data[order(key, decreasing=TRUE)][1:.n])
-}
-
+```{r future_test_pos_Re08, eval = FALSE}
 #start <- Sys.time()
 test_cl <- makeCluster(detectCores())         # Make cluster
-clusterExport(test_cl, c("future_runs_Hadm", 
-                         "weighted_Random_Sample"))         # Export objects to cluster
+clusterExport(test_cl, c("future_runs_Hadm_Re08", 
+                         "bias_median"))         # Export objects to cluster
 
-clusterEvalQ(test_cl, require(tidyverse))
+clusterEvalQ(test_cl, lapply(c("tidyverse", "wrswoR"), library, character.only = T))
 
-stoch_sim_tests <- parApply(test_cl, future_runs_Hadm %>% drop_na(), 1, 
+stoch_sim_tests <- parApply(test_cl, future_runs_Hadm_Re08 %>% drop_na(), 1, 
                             function(t){
                               t <- as.numeric(t)
                               
@@ -1120,11 +1085,11 @@ stoch_sim_tests <- parApply(test_cl, future_runs_Hadm %>% drop_na(), 1,
                                                  rep(1, (t[4]+t[5]))) # Irs and Ihs
                               samps <- t[12]-t[18]                  # number tests minus hospital admissions
                               probs <- c(rep(1, (t[2]+t[3])),
-                                        rep(45, (t[4]+t[5])))       # Sampling bias of 45
+                                        rep(bias_median, (t[4]+t[5])))       # Sampling bias
                               
-                              t_samp <- weighted_Random_Sample(inf_status, probs, samps) 
+                              t_samp <- sample_int_crank(length(inf_status), samps, probs) 
                               
-                              return(sum(t_samp)/(t[12]-t[18]))
+                              return(sum(inf_status[t_samp])/(t[12]-t[18])) #Return pct positive
                             })
 
 stopCluster(test_cl)
@@ -1133,25 +1098,24 @@ stopCluster(test_cl)
 #as.numeric(end-start)*nrow(future_runs_Hadm)/360000
 
 saveRDS(stoch_sim_tests, 
-        "future_stoch_runs_tests_Re14_6-7-20.rds")
+        "future_stoch_runs_tests_Re08_6-15-20.rds")
 
 ```
 
-```{r plot_stoch_sims_test14}
-stoch_sim_tests <- readRDS("future_stoch_runs_tests_Re14_6-7-20.rds")
+```{r plot_stoch_sims_test_r08}
+stoch_sim_tests_Re08 <- readRDS("future_stoch_runs_tests_Re08_6-15-20.rds")
 
-future_runs_tests_sum <- as.data.frame(cbind(future_runs_Hadm %>% drop_na(),
-                                           sim_pct_pos = stoch_sim_tests)) %>% 
+future_runs_tests_sum_Re08 <- as.data.frame(cbind(future_runs_Hadm_Re08 %>% drop_na(),
+                                           sim_pct_pos = stoch_sim_tests_Re08)) %>% 
   arrange(time) %>% 
-  mutate(sim_pos = round(sim_pct_pos*tests_use),
-         time_cut = cut(time, breaks = c(0:t.future))) %>% 
-  group_by(time_cut, sim) %>% 
-  summarise(H_adm = sum(newH),
-            n_tests = sum(tests),
-            n_pos = sum(sim_pos)) %>% 
-  mutate(test_pct_pos = n_pos/n_tests,
-         time = as.numeric(time_cut),
-         Date = as.Date(as.Date("2020-06-03")+time))
+  mutate(time_cut = cut(time, breaks = c(0:t.future))) %>% 
+  group_by(time_cut) %>% 
+    summarise(pct_pos_med = median(sim_pct_pos),
+              pct_pos_25th = quantile(sim_pct_pos, 0.25),
+              pct_pos_75th = quantile(sim_pct_pos, 0.75)) %>% 
+  mutate(time = as.numeric(time_cut),
+         Date = last_fit+time-2,
+         Re = 0.8)
 
   ggplot() +
     theme_bw() +
@@ -1163,17 +1127,176 @@ future_runs_tests_sum <- as.data.frame(cbind(future_runs_Hadm %>% drop_na(),
   geom_line(data = sf_test %>% filter(Date >= as.Date("2020-04-23")),
             aes(x = Date, y = pct),
             size = 1.1)  +
-  geom_line(data = future_runs_tests_sum,
-            aes(x = Date, y = test_pct_pos, group = as.factor(sim)),
-            size = 0.2, col = "grey50", alpha = 0.6) +
+  geom_ribbon(data = future_runs_tests_sum_Re08,
+                aes(x = Date, ymin = pct_pos_25th, ymax = pct_pos_75th),
+                alpha = 0.3, fill = "gold")+
+  geom_line(data = future_runs_tests_sum_Re08,
+            aes(x = Date, y = pct_pos_med),
+            size = 1.2, col = "gold") +
   labs(x = "Date", y = "% Positive tests",
        title = "Future Positive test percentages",
-       subtitle = "Assuming 1600 tests per day, B=45, Re=1.4 by June 15")
+       subtitle = paste("Assuming", proj_tests_per_day, "tests per day, B=", 
+                        round(bias_median), ", Re->0.8"))
 
 ```
 
-```{r plot_Hadm}
-future_runs_tests_sum %>% 
+### $\mathcal{R}_e\rightarrow1.1$  
+
+```{r stoch_sims_setup_Re11}
+#Function for future beta conditions
+t.future <- as.numeric(t.end - last_fit)
+
+new.Re <- 1.1
+new.beta <- get_beta(new.Re, best.pars[["alpha"]], 
+                     best.pars[["gam_r"]], best.pars[["rho"]])
+t_til_new_beta <- 7
+future_beta <- approxfun(c(0, t_til_new_beta,t.future), c(best_pt_pars[8], new.beta, new.beta), method = "linear")
+
+```
+
+```{r r11_sims, eval = FALSE}
+set.seed(430)
+
+future_runs_Hadm_Re11 <- bind_rows(lapply(1:100, function(i){
+  as.data.frame(stoch.sim(init = init_Hadm, 
+                          trans = transitions_Hadm, 
+                          rates = rates_Hadm,
+                          pars = best.pars,
+                          t_sim = t.future)) %>% 
+    mutate(sim = i,
+           dt = time-lag(time),
+           tests = round(dt*proj_tests_per_day),
+           datetime = as.POSIXct(sf_test %>% 
+                                   filter(Date == last_fit) %>% 
+                                   pull(specimen_collection_date))+(time*86400))
+  }))
+
+saveRDS(future_runs_Hadm_Re11, 
+        "future_stoch_runs_Re11_6-15-20.rds")
+
+```
+
+```{r r11_sims_plot}
+future_runs_Hadm_Re11 <- readRDS("future_stoch_runs_Re11_6-15-20.rds")
+
+re11_stoch_sum <- future_runs_Hadm_Re11 %>% 
+  arrange(time) %>% 
+  mutate(time_cut = cut(time, breaks = c(0:t.end))) %>% 
+  group_by(time_cut) %>% 
+  summarise(S_med = median(S),
+            S25th = quantile(S, 0.25),
+            S75th = quantile(S, 0.75),
+            E_med = median(E),
+            E25th = quantile(E, 0.25),
+            E75th = quantile(E, 0.75),
+            Ia_med = median(Ir),
+            Ir25th = quantile(Ir, 0.25),
+            Ir75th = quantile(Ir, 0.75),
+            Is_med = median(Ih),
+            Ih25th = quantile(Ih, 0.25),
+            Ih75th = quantile(Ih, 0.75),
+            H_med = median(H),
+            H25th = quantile(H, 0.25),
+            H75th = quantile(H, 0.75),
+            Rr_med = median(Rr),
+            Rr25th = quantile(Rr, 0.25),
+            Rr75th = quantile(Rr, 0.75),
+            D_med = median(D),
+            D25th = quantile(D, 0.25),
+            D75th = quantile(D, 0.75),
+            Rh_med = median(Rh),
+            Rh25th = quantile(Rh, 0.25),
+            Rh75th = quantile(Rh, 0.75),
+            tests = sum(tests)/max(future_runs_Hadm_Re11$sim)) %>% 
+  mutate(time = as.numeric(time_cut),
+         Date = last_fit+time-2, 
+         Re = 1.1)
+
+ggplot() +
+  theme_bw() +
+  theme(axis.title = element_text(size = 14,
+                                  face = "bold"),
+        axis.text = element_text(size = 12),
+        axis.text.x = element_text(angle = 45,
+                                   hjust = 1)) +
+  geom_col(data = sf_all,
+           aes(x = Date, y = HOSP_CONF+ICU_CONF),
+           col = "black",  fill = "grey60")  +
+  geom_line(data = best.sim,
+            aes(x = Date, y = H),
+            col = "coral", size = 1.2) +
+  geom_ribbon(data = re11_stoch_sum,
+              aes(x = Date, ymin = H25th, ymax = H75th),
+              fill = "red", alpha = 0.3) +
+  geom_line(data = re11_stoch_sum,
+            aes(x = Date, y = H_med),
+            size = 1.2, col = "red") +
+  labs(x = "Date", y = "Hospitalizations",
+       title = "Hospitalizations projection with Re->1.1")
+
+```
+
+```{r plot_stoch_sims_Hadm11, include = FALSE}
+future_runs_Hadm_Re11 <- future_runs_Hadm_Re11 %>% 
+  group_by(sim) %>% 
+  mutate(dH = H - lag(H),
+         dRh = Rh - lag(Rh),
+         dD = D-lag(D),
+         outH = dRh + dD,
+         newH = dH+outH,
+         tests_noH = tests-newH,
+         tests_use = if_else(tests_noH < 1, NA_real_, tests_noH),
+         Date = as.Date(datetime))
+```
+
+```{r future_test_pos_re11, eval = FALSE}
+#start <- Sys.time()
+test_cl <- makeCluster(detectCores())         # Make cluster
+clusterExport(test_cl, c("future_runs_Hadm_Re11", 
+                         "bias_median"))         # Export objects to cluster
+
+clusterEvalQ(test_cl, lapply(c("tidyverse", "wrswoR"), library, character.only = T))
+
+stoch_sim_tests <- parApply(test_cl, future_runs_Hadm_Re11 %>% drop_na(), 1, 
+                            function(t){
+                              t <- as.numeric(t)
+                              
+                              inf_status <- c(rep(0, (t[2]+t[3])),    # Ss and Es
+                                                 rep(1, (t[4]+t[5]))) # Irs and Ihs
+                              samps <- t[12]-t[18]                  # number tests minus hospital admissions
+                              probs <- c(rep(1, (t[2]+t[3])),
+                                        rep(bias_median, (t[4]+t[5])))       # Sampling bias
+                              
+                              t_samp <- sample_int_crank(length(inf_status), samps, probs) 
+                              
+                              return(sum(inf_status[t_samp])/(t[12]-t[18])) #Return pct positive
+                            })
+
+stopCluster(test_cl)
+#end <- Sys.time()
+
+#as.numeric(end-start)*nrow(future_runs_Hadm)/360000
+
+saveRDS(stoch_sim_tests, 
+        "future_stoch_runs_tests_Re11_6-15-20.rds")
+
+```
+
+```{r plot_stoch_sims_test_Re11}
+stoch_sim_tests_Re11 <- readRDS("future_stoch_runs_tests_Re11_6-15-20.rds")
+
+future_runs_tests_sum_Re11 <- as.data.frame(cbind(future_runs_Hadm_Re11 %>% drop_na(),
+                                           sim_pct_pos = stoch_sim_tests_Re11)) %>% 
+  arrange(time) %>% 
+  mutate(time_cut = cut(time, breaks = c(0:t.future))) %>% 
+  group_by(time_cut) %>% 
+    summarise(pct_pos_med = median(sim_pct_pos),
+              pct_pos_25th = quantile(sim_pct_pos, 0.25),
+              pct_pos_75th = quantile(sim_pct_pos, 0.75)) %>% 
+  mutate(time = as.numeric(time_cut),
+         Date = last_fit+time-2,
+         Re = 1.1)
+
   ggplot() +
     theme_bw() +
     theme(axis.title = element_text(size = 14,
@@ -1181,18 +1304,181 @@ future_runs_tests_sum %>%
           axis.text = element_text(size = 12),
           axis.text.x = element_text(angle = 45,
                                      hjust = 1)) +
-  geom_line(aes(x = Date, y = H_adm, group = as.factor(sim)),
-            size = 0.2, col = "grey50", alpha = 0.6) +
-  labs(x = "Date", y = "Hospital admissions",
-       title = paste("Projected Hospital Admissions with \nRe reaching ", 
-                     new.Re, " in ", t_til_new_beta, " days\nand remaining until",
-                     end.date))
+  geom_line(data = sf_test %>% filter(Date >= as.Date("2020-04-23")),
+            aes(x = Date, y = pct),
+            size = 1.1)  +
+  geom_ribbon(data = future_runs_tests_sum_Re11,
+                aes(x = Date, ymin = pct_pos_25th, ymax = pct_pos_75th),
+                alpha = 0.3, fill = "gold")+
+  geom_line(data = future_runs_tests_sum_Re11,
+            aes(x = Date, y = pct_pos_med),
+            size = 1.2, col = "gold") +
+  labs(x = "Date", y = "% Positive tests",
+       title = "Future Positive test percentages",
+       subtitle = paste("Assuming", proj_tests_per_day, "tests per day, B=",round(bias_median), ", Re->1.1"))
 
 ```
 
 
-```{r comp_admissions_pos_tests}
-future_runs_tests_sum %>% 
+### $\mathcal{R}_e\rightarrow1.4$  
+
+```{r stoch_sims_setup_Re14}
+#Function for future beta conditions
+t.future <- as.numeric(t.end - last_fit)
+
+new.Re <- 1.4 
+new.beta <- get_beta(new.Re, best.pars[["alpha"]], 
+                     best.pars[["gam_r"]], best.pars[["rho"]])
+t_til_new_beta <- 7
+future_beta <- approxfun(c(0, t_til_new_beta,t.future), c(best_pt_pars[8], new.beta, new.beta), method = "linear")
+
+```
+
+```{r r14_sims}
+set.seed(430)
+
+future_runs_Hadm_Re14 <- bind_rows(lapply(1:100, function(i){
+  as.data.frame(stoch.sim(init = init_Hadm, 
+                          trans = transitions_Hadm, 
+                          rates = rates_Hadm,
+                          pars = best.pars,
+                          t_sim = t.future)) %>% 
+    mutate(sim = i,
+           dt = time-lag(time),
+           tests = round(dt*proj_tests_per_day),
+           datetime = as.POSIXct(sf_test %>% 
+                                   filter(Date == last_fit) %>% 
+                                   pull(specimen_collection_date))+(time*86400))
+  }))
+saveRDS(future_runs_Hadm_Re14, 
+        "future_stoch_runs_Re14_6-15-20.rds")
+
+```
+
+```{r r14_sims_plot}
+future_runs_Hadm_Re14 <- readRDS("future_stoch_runs_Re14_6-15-20.rds")
+
+re14_stoch_sum <- future_runs_Hadm_Re14 %>% 
+  arrange(time) %>% 
+  mutate(time_cut = cut(time, breaks = c(0:t.end))) %>% 
+  group_by(time_cut) %>% 
+  summarise(S_med = median(S),
+            S25th = quantile(S, 0.25),
+            S75th = quantile(S, 0.75),
+            E_med = median(E),
+            E25th = quantile(E, 0.25),
+            E75th = quantile(E, 0.75),
+            Ia_med = median(Ir),
+            Ir25th = quantile(Ir, 0.25),
+            Ir75th = quantile(Ir, 0.75),
+            Is_med = median(Ih),
+            Ih25th = quantile(Ih, 0.25),
+            Ih75th = quantile(Ih, 0.75),
+            H_med = median(H),
+            H25th = quantile(H, 0.25),
+            H75th = quantile(H, 0.75),
+            Rr_med = median(Rr),
+            Rr25th = quantile(Rr, 0.25),
+            Rr75th = quantile(Rr, 0.75),
+            D_med = median(D),
+            D25th = quantile(D, 0.25),
+            D75th = quantile(D, 0.75),
+            Rh_med = median(Rh),
+            Rh25th = quantile(Rh, 0.25),
+            Rh75th = quantile(Rh, 0.75),
+            tests = sum(tests)/max(future_runs_Hadm_Re14$sim)) %>% 
+  mutate(time = as.numeric(time_cut),
+         Date = last_fit+time-2, 
+         Re = 1.4)
+
+
+
+ggplot() +
+  theme_bw() +
+  theme(axis.title = element_text(size = 14,
+                                  face = "bold"),
+        axis.text = element_text(size = 12),
+        axis.text.x = element_text(angle = 45,
+                                   hjust = 1)) +
+  geom_col(data = sf_all,
+           aes(x = Date, y = HOSP_CONF+ICU_CONF),
+           fill = "grey60", col = "black")  +
+  geom_line(data = best.sim,
+            aes(x = Date, y = H),
+            col = "coral", size = 1.2) +
+  geom_ribbon(data = re14_stoch_sum,
+              aes(x = Date, ymin = H25th, ymax = H75th),
+              fill = "red", alpha = 0.3) +
+  geom_line(data = re14_stoch_sum,
+            aes(x = Date, y = H_med),
+            size = 1.2, col = "red") +
+  labs(x = "Date", y = "Hospitalizations",
+       main = "Hospitalizations projection with Re->1.4")
+
+```
+
+```{r plot_stoch_sims_Hadm14, include = FALSE}
+future_runs_Hadm_Re14 <- future_runs_Hadm_Re14 %>% 
+  group_by(sim) %>% 
+  mutate(dH = H - lag(H),
+         dRh = Rh - lag(Rh),
+         dD = D-lag(D),
+         outH = dRh + dD,
+         newH = dH+outH,
+         tests_noH = tests-newH,
+         tests_use = if_else(tests_noH < 1, NA_real_, tests_noH),
+         Date = as.Date(datetime))
+
+```
+
+```{r future_test_pos_re14, eval = FALSE}
+#start <- Sys.time()
+test_cl <- makeCluster(detectCores())         # Make cluster
+clusterExport(test_cl, c("future_runs_Hadm_Re14", 
+                         "bias_median"))         # Export objects to cluster
+
+clusterEvalQ(test_cl, lapply(c("tidyverse", "wrswoR"), library, character.only = T))
+
+stoch_sim_tests <- parApply(test_cl, future_runs_Hadm_Re14 %>% drop_na(), 1, 
+                            function(t){
+                              t <- as.numeric(t)
+                              
+                              inf_status <- c(rep(0, (t[2]+t[3])),    # Ss and Es
+                                                 rep(1, (t[4]+t[5]))) # Irs and Ihs
+                              samps <- t[12]-t[18]                  # number tests minus hospital admissions
+                              probs <- c(rep(1, (t[2]+t[3])),
+                                        rep(bias_median, (t[4]+t[5])))       # Sampling bias
+                              
+                              t_samp <- sample_int_crank(length(inf_status), samps, probs) 
+                              
+                              return(sum(inf_status[t_samp])/(t[12]-t[18])) #Return pct positive
+                            })
+
+stopCluster(test_cl)
+#end <- Sys.time()
+
+#as.numeric(end-start)*nrow(future_runs_Hadm)/360000
+
+saveRDS(stoch_sim_tests, 
+        "future_stoch_runs_tests_Re14_6-15-20.rds")
+
+```
+
+```{r plot_stoch_sims_test_Re14}
+stoch_sim_tests_Re14 <- readRDS("future_stoch_runs_tests_Re14_6-15-20.rds")
+
+future_runs_tests_sum_Re14 <- as.data.frame(cbind(future_runs_Hadm_Re14 %>% drop_na(),
+                                           sim_pct_pos = stoch_sim_tests_Re14)) %>% 
+  arrange(time) %>% 
+  mutate(time_cut = cut(time, breaks = c(0:t.future))) %>% 
+  group_by(time_cut) %>% 
+    summarise(pct_pos_med = median(sim_pct_pos),
+              pct_pos_25th = quantile(sim_pct_pos, 0.25),
+              pct_pos_75th = quantile(sim_pct_pos, 0.75)) %>% 
+  mutate(time = as.numeric(time_cut),
+         Date = last_fit+time-2,
+         Re = 1.4)
+
   ggplot() +
     theme_bw() +
     theme(axis.title = element_text(size = 14,
@@ -1200,84 +1486,428 @@ future_runs_tests_sum %>%
           axis.text = element_text(size = 12),
           axis.text.x = element_text(angle = 45,
                                      hjust = 1)) +
-  geom_line(aes(x = Date, y = n_pos, group = as.factor(sim)),
-            size = 0.2, col = "blue", alpha = 0.6) +
-  geom_line(aes(x = Date, y = H_adm, group = as.factor(sim)),
-            size = 0.2, col = "red", alpha = 0.6) +
-  labs(x = "Date", y = "Metrics",
-       title = "Simulations of potential SiP Triggers",
-       subtitle = "Assuming 1600 tests per day, B=45, Re=1.4 by June 15\nBlue-positive tests,    Red-Hospital admissions")
+  geom_line(data = sf_test %>% filter(Date >= as.Date("2020-04-23")),
+            aes(x = Date, y = pct),
+            size = 1.1)  +
+  geom_ribbon(data = future_runs_tests_sum_Re14,
+                aes(x = Date, ymin = pct_pos_25th, ymax = pct_pos_75th),
+                alpha = 0.3, fill = "gold")+
+  geom_line(data = future_runs_tests_sum_Re14,
+            aes(x = Date, y = pct_pos_med),
+            size = 1.2, col = "gold") +
+  labs(x = "Date", y = "% Positive tests",
+       title = "Future Positive test percentages",
+       subtitle = paste("Assuming", proj_tests_per_day, "tests per day, B=", round(bias_median), ", Re->1.4"))
 
 ```
 
-```{r trigger_metrics}
-future_runs_tests_sum %>% 
-  group_by(Date) %>% 
-    summarise(mean_pctPos = mean(test_pct_pos),
-              mean_n_pos = mean(n_pos),
-              mean_H_adm = mean(H_adm)) %>% 
-    mutate(`Pct Pos 3day` = zoo::rollmean(mean_pctPos,3, na.pad = T),
-           `N Pos 3day` = zoo::rollmean(mean_n_pos,3, na.pad = T),
-           `H Adm 3day` = zoo::rollmean(mean_H_adm,3, na.pad = T)) %>% 
-  pivot_longer(`Pct Pos 3day`:`H Adm 3day`, names_to = "Metric") %>% 
+## Compare tests, hospitalizations in different future transmission scenarios  
+```{r hosp_future}
+all_stoch_sums <- as.data.frame(rbind(re08_stoch_sum,
+                                      re11_stoch_sum,
+                                      re14_stoch_sum)) 
   ggplot() +
     theme_bw() +
     theme(axis.title = element_text(size = 14,
                                     face = "bold"),
           axis.text = element_text(size = 12),
           axis.text.x = element_text(angle = 45,
-                                     hjust = 1)) +
-    geom_line(aes(x = Date, y = value),
-              size = 1.1) +
-    facet_grid(Metric~., scales = "free_y")
+                                     hjust = 1),
+          legend.text = element_text(size =14)) +
+    geom_col(data = sf_all,
+             aes(x = Date, y = HOSP_CONF+ICU_CONF),
+             fill = "grey60", col = "black")  +
+    geom_line(data = best.sim,
+              aes(x = Date, y = H),
+              col = "coral", size = 1.2) +
+    geom_ribbon(data = all_stoch_sums,
+                aes(x = Date, ymin = H25th, ymax = H75th,
+                    fill = as.factor(Re)),
+                alpha = 0.3) +
+    geom_line(data = all_stoch_sums,
+              aes(x =Date, y = H_med, col = as.factor(Re)),
+              size = 1.2) +
+    scale_fill_manual(values = c("gold1", "darkorange", "firebrick"),
+                       labels = c("Re->0.8",
+                                  "Re->1.1",
+                                  "Re->1.4")) +
+    scale_color_manual(values = c("gold1", "darkorange", "firebrick"),
+                       labels = c("Re->0.8",
+                                  "Re->1.1",
+                                  "Re->1.4")) +
+    labs(x = "Date", y = "Hospitalizations",
+         title = "Future Hospitalizations projections under different transmission scenarios",
+         fill = "", col = "")
 
 ```
 
-```{r stoch_tests, eval=FALSE}
-rates_test <- function(x, p, t, fx) {
-  S = x['S']
-  E = x['E']
-  Ir = x['Ir']
-  Ih = x['Ih']
-  H = x['H']
-  R = x['R']
-  D = x["D"]
-  
-  tested <- sample(c(rep(0, S+E+Ir+Ih),
-                     rep(1, Ir+Ih)),
-                   1600,
-                   prob = c(rep(1, S+E+Ir+Ih),
-                            rep(45, Ir+Ih)))
-  
-  test_pos_rate <- sum(tested)/(S+E+Ir+Ih)
-  
-  print(test_pos_rate)
-  
-  # Parameters
-    N = p[['N']]             #population size
-    beta =future_beta(t)     #transmission rate
-    cr = p[['cr']]           #Relative contact rate between S and Ir
-    ch = p[['ch']]           #Relative contact rate between S and Ih
-    sigma = p[['sigma']]     #1/serial interval
-    alpha = p[['alpha']]     #proportion severely symptomatic
-    rho = p[['rho']]         #1/time between symptom onset and hospitalization
-    gam_r = p[['gam_r']]     #1/time to recovery (non-infectiousness) for mild/asymptomatic
-    gam_h = p[['gam_h']]     #1/time to removed (recovered or deceased) for hospitalized
-    mu = p[['mu']]           #proportion of hospitalized cases who die
-  
-  return(c(S*beta*(Ir*cr+Ih*ch)/N, #Susceptible becomes exposed
-           E*(1-alpha)*sigma,      #Exposed becomes Infected, pre-symptomatic
-           E*alpha*sigma,          #Exposed becomes Infected, asymptomatic
-           Ir*gam_r,               #Infected, pre-symptomatic becomes Infected, severe
-           Ih*rho,                 #Infected, pre-symptomatic becomes Infected, mild
-           H*mu*gam_h,             #Hospitalized becomes Dead
-           H*(1-mu)*gam_h))        #Hospitalized becomes recovered
-}
+```{r tests_future}
+all_stoch_test_sums <- as.data.frame(rbind(future_runs_tests_sum_Re08,
+                                           future_runs_tests_sum_Re11,
+                                           future_runs_tests_sum_Re14)) 
+  ggplot() +
+    theme_bw() +
+    theme(axis.title = element_text(size = 14,
+                                    face = "bold"),
+          axis.text = element_text(size = 12),
+          axis.text.x = element_text(angle = 45,
+                                     hjust = 1),
+          legend.text = element_text(size =14)) +
+  geom_line(data = sf_test %>% filter(Date >= as.Date("2020-04-23")),
+            aes(x = Date, y = pct),
+            size = 1.1)  +
+  geom_ribbon(data = all_stoch_test_sums,
+                aes(x = Date, ymin = pct_pos_25th, ymax = pct_pos_75th, 
+                    fill = as.factor(Re)),
+                alpha = 0.3)+
+  geom_line(data = all_stoch_test_sums,
+            aes(x = Date, y = pct_pos_med,
+                col = as.factor(Re)),
+            size = 1.2) +
+    scale_fill_manual(values = c("gold1", "darkorange", "firebrick"),
+                       labels = c("Re->0.8",
+                                  "Re->1.1",
+                                  "Re->1.4")) +
+    scale_color_manual(values = c("gold1", "darkorange", "firebrick"),
+                       labels = c("Re->0.8",
+                                  "Re->1.1",
+                                  "Re->1.4")) +
+  labs(x = "Date", y = "% Positive tests",
+       title = "Future Positive test percentages under different transmission scenarios",
+       subtitle = paste("Assuming", proj_tests_per_day, "tests per day, B=", round(bias_median), ", Re->0.8"),
+       fill = "", col = "")
 
-stoch.sim(init = init_today, 
-          trans = transitions, 
-          rates = rates_test,
-          pars = best.pars,
-          t_sim = t.future)
+```
+
+```{r pct_smooth}
+test_pos_pct_smooth_plot <- ggplot() +
+    theme_bw() +
+    theme(axis.title = element_text(size = 14,
+                                    face = "bold"),
+          axis.text = element_text(size = 12),
+          axis.text.x = element_text(angle = 45,
+                                     hjust = 1),
+          legend.text = element_text(size =14)) +
+  geom_line(data = sf_test %>% 
+                mutate(pct_7dayavg = zoo::rollmean(pct, 7, fill = NA)) %>% 
+                filter(Date >= as.Date("2020-04-23")),
+              aes(x = Date, y = pct_7dayavg),
+            size = 1.1)  +
+  geom_ribbon(data = all_stoch_test_sums,
+                aes(x = Date, ymin = pct_pos_25th, ymax = pct_pos_75th, 
+                    fill = as.factor(Re)),
+                alpha = 0.3)+
+  geom_line(data = all_stoch_test_sums,
+            aes(x = Date, y = pct_pos_med,
+                col = as.factor(Re)),
+            size = 1.2) +
+    scale_fill_manual(values = c("gold1", "darkorange", "firebrick"),
+                       labels = c("Re->0.8",
+                                  "Re->1.1",
+                                  "Re->1.4")) +
+    scale_color_manual(values = c("gold1", "darkorange", "firebrick"),
+                       labels = c("Re->0.8",
+                                  "Re->1.1",
+                                  "Re->1.4")) +
+  labs(x = "Date", y = "% Positive tests (7-day average)",
+       title = "Future Positive test percentages under different transmission scenarios",
+       subtitle =paste("  Assuming ", proj_tests_per_day, " tests per day, B=", round(bias_median)),
+       fill = "", col = "")
+
+test_pos_pct_smooth_plot
+```
+
+```{r sf_tests_p100k}
+  ggplot() +
+    theme_bw() +
+    theme(axis.title = element_text(size = 14,
+                                    face = "bold"),
+          axis.text = element_text(size = 12),
+          axis.text.x = element_text(angle = 45,
+                                     hjust = 1),
+          legend.position = "none") +
+    geom_line(data = sf_test %>% 
+                filter(Date >= as.Date("2020-04-23")),
+              aes(x = Date, y = tests_p100k),
+            size = 1.1)  +
+    geom_line(data = all_stoch_sums %>% 
+                group_by(Re) %>% 
+                mutate(tests_smooth = rollmean(tests, 7, fill = NA, align = "right")),
+              aes(x = Date, y = (tests_smooth/pop.size)*1e5, 
+                  col = as.factor(Re)), size = 1.2) +
+    scale_color_manual(values = c("gold1", "darkorange", "firebrick"),
+                       labels = c("Re->0.8",
+                                  "Re->1.1",
+                                  "Re->1.4")) +
+    labs(x = "Date",
+         y = "Tests conducted per 100k",
+         title = "Tests conducted leading up to and in simulations")
+  
+```
+
+```{r sf_tests_p100k_smooth}
+  ggplot() +
+    theme_bw() +
+    theme(axis.title = element_text(size = 14,
+                                    face = "bold"),
+          axis.text = element_text(size = 12),
+          axis.text.x = element_text(angle = 45,
+                                     hjust = 1),
+          legend.position = "none") +
+    geom_line(data = sf_test %>% 
+                filter(Date >= as.Date("2020-04-23")),
+              aes(x = Date, y = tests_p100k_smooth),
+            size = 1.1)  +
+    geom_line(data = all_stoch_sums %>% 
+                group_by(Re) %>% 
+                mutate(tests_smooth = rollmean(tests, 7, fill = NA, align = "right")),
+              aes(x = Date, y = (tests_smooth/pop.size)*1e5, 
+                  col = as.factor(Re)), size = 1.2) +
+    scale_color_manual(values = c("gold1", "darkorange", "firebrick"),
+                       labels = c("Re->0.8",
+                                  "Re->1.1",
+                                  "Re->1.4")) +
+    labs(x = "Date",
+         y = "Tests conducted per 100k (7 day average)",
+         title = "Tests conducted leading up to and in simulations")
+  
+```
+
+## Consequences of unaccounted changes in sampling bias  
+If sampling bias decreases such that infectious people are less likely to seek testing, our ability to detect an increase in $\mathcal{R}_e$ through testing data is likely to be limited, and may even give a false sense of security: positive % or number of positive tests may appear to be decreasing, even as transmission is increasing, if the sampling bias of infectious people has decreased. Therefore here the assumption that testing bias remains constant in the nearterm projections is changed to an assumption that the testing bias decreases by ~30%. This is feasible to imagine as people may become more complacent/accustomed to COVID and therefore decrease they're test-seeking behavior, especially among mild cases. E.g. someone with a headache and mild cough who would have been very concerned about COVID in April/May no longer seeks out testing or delays testing until more serious symptoms arise or persist.
+
+```{r bias_reduction}
+bias_reduced <- floor(bias_median*0.7)
+
+```
+
+```{r future_test_pos_re08_bias_decrease, eval = FALSE}
+bias_reduced <- floor(bias_median*0.7)
+
+#start <- Sys.time()
+test_cl <- makeCluster(detectCores())         # Make cluster
+clusterExport(test_cl, c("future_runs_Hadm_Re08", 
+                         "bias_reduced"))         # Export objects to cluster
+
+clusterEvalQ(test_cl, lapply(c("tidyverse", "wrswoR"), library, character.only = T))
+
+stoch_sim_tests <- parApply(test_cl, future_runs_Hadm_Re08 %>% drop_na(), 1, 
+                            function(t){
+                              t <- as.numeric(t)
+                              
+                              inf_status <- c(rep(0, (t[2]+t[3])),    # Ss and Es
+                                                 rep(1, (t[4]+t[5]))) # Irs and Ihs
+                              samps <- t[12]-t[18]                  # number tests minus hospital admissions
+                              probs <- c(rep(1, (t[2]+t[3])),
+                                        rep(bias_reduced, (t[4]+t[5])))       # Sampling bias
+                              
+                              t_samp <- sample_int_crank(length(inf_status), samps, probs) 
+                              
+                              return(sum(inf_status[t_samp])/(t[12]-t[18])) #Return pct positive
+                            })
+
+stopCluster(test_cl)
+#end <- Sys.time()
+
+#as.numeric(end-start)*nrow(future_runs_Hadm)/360000
+
+saveRDS(stoch_sim_tests, 
+        "future_stoch_runs_tests_Re08_decrease_bias_6-15-20.rds")
+
+```
+
+```{r future_test_pos_re11_bias_decrease, eval = FALSE}
+#start <- Sys.time()
+test_cl <- makeCluster(detectCores())         # Make cluster
+clusterExport(test_cl, c("future_runs_Hadm_Re11", 
+                         "bias_reduced"))         # Export objects to cluster
+
+clusterEvalQ(test_cl, lapply(c("tidyverse", "wrswoR"), library, character.only = T))
+
+stoch_sim_tests <- parApply(test_cl, future_runs_Hadm_Re11 %>% drop_na(), 1, 
+                            function(t){
+                              t <- as.numeric(t)
+                              
+                              inf_status <- c(rep(0, (t[2]+t[3])),    # Ss and Es
+                                                 rep(1, (t[4]+t[5]))) # Irs and Ihs
+                              samps <- t[12]-t[18]                  # number tests minus hospital admissions
+                              probs <- c(rep(1, (t[2]+t[3])),
+                                        rep(bias_reduced, (t[4]+t[5])))       # Sampling bias
+                              
+                              t_samp <- sample_int_crank(length(inf_status), samps, probs) 
+                              
+                              return(sum(inf_status[t_samp])/(t[12]-t[18])) #Return pct positive
+                            })
+
+stopCluster(test_cl)
+#end <- Sys.time()
+
+#as.numeric(end-start)*nrow(future_runs_Hadm)/360000
+
+saveRDS(stoch_sim_tests, 
+        "future_stoch_runs_tests_Re11_decrease_bias_6-15-20.rds")
+
+```
+
+```{r future_test_pos_re14_bias_decrease, eval = FALSE}
+#start <- Sys.time()
+test_cl <- makeCluster(detectCores())         # Make cluster
+clusterExport(test_cl, c("future_runs_Hadm_Re14", 
+                         "bias_reduced"))         # Export objects to cluster
+
+clusterEvalQ(test_cl, lapply(c("tidyverse", "wrswoR"), library, character.only = T))
+
+stoch_sim_tests <- parApply(test_cl, future_runs_Hadm_Re14 %>% drop_na(), 1, 
+                            function(t){
+                              t <- as.numeric(t)
+                              
+                              inf_status <- c(rep(0, (t[2]+t[3])),    # Ss and Es
+                                                 rep(1, (t[4]+t[5]))) # Irs and Ihs
+                              samps <- t[12]-t[18]                  # number tests minus hospital admissions
+                              probs <- c(rep(1, (t[2]+t[3])),
+                                        rep(bias_reduced, (t[4]+t[5])))       # Sampling bias
+                              
+                              t_samp <- sample_int_crank(length(inf_status), samps, probs) 
+                              
+                              return(sum(inf_status[t_samp])/(t[12]-t[18])) #Return pct positive
+                            })
+
+stopCluster(test_cl)
+#end <- Sys.time()
+
+#as.numeric(end-start)*nrow(future_runs_Hadm)/360000
+
+saveRDS(stoch_sim_tests, 
+        "future_stoch_runs_tests_Re14_decrease_bias_6-15-20.rds")
+
+```
+
+```{r bias_decrease_sums}
+# Re=0.8, bias reduced by ~30%
+
+stoch_sim_tests_decrease_bias_Re08 <- readRDS("future_stoch_runs_tests_Re08_decrease_bias_6-15-20.rds")
+
+future_runs_tests_decrease_bias_sum_Re08 <- as.data.frame(cbind(future_runs_Hadm_Re08 %>% drop_na(),
+                                                                sim_pct_pos = stoch_sim_tests_decrease_bias_Re08)) %>% 
+  arrange(time) %>% 
+  mutate(time_cut = cut(time, breaks = c(0:t.future))) %>% 
+  group_by(time_cut) %>% 
+  summarise(pct_pos_med = median(sim_pct_pos),
+            pct_pos_25th = quantile(sim_pct_pos, 0.25),
+            pct_pos_75th = quantile(sim_pct_pos, 0.75)) %>% 
+  mutate(time = as.numeric(time_cut),
+         Date = last_fit+time-2,
+         Re = 0.8)
+
+# Re=0.8, bias reduced by ~30%
+
+stoch_sim_tests_decrease_bias_Re11 <- readRDS("future_stoch_runs_tests_Re11_decrease_bias_6-15-20.rds")
+
+future_runs_tests_decrease_bias_sum_Re11 <- as.data.frame(cbind(future_runs_Hadm_Re11 %>% drop_na(),
+                                                                sim_pct_pos = stoch_sim_tests_decrease_bias_Re11)) %>% 
+  arrange(time) %>% 
+  mutate(time_cut = cut(time, breaks = c(0:t.future))) %>% 
+  group_by(time_cut) %>% 
+  summarise(pct_pos_med = median(sim_pct_pos),
+            pct_pos_25th = quantile(sim_pct_pos, 0.25),
+            pct_pos_75th = quantile(sim_pct_pos, 0.75)) %>% 
+  mutate(time = as.numeric(time_cut),
+         Date = last_fit+time-2,
+         Re = 1.1)
+
+# Re=0.8, bias reduced by ~30%
+
+stoch_sim_tests_decrease_bias_Re14 <- readRDS("future_stoch_runs_tests_Re14_decrease_bias_6-15-20.rds")
+
+future_runs_tests_decrease_bias_sum_Re14 <- as.data.frame(cbind(future_runs_Hadm_Re14 %>% drop_na(),
+                                                                sim_pct_pos = stoch_sim_tests_decrease_bias_Re14)) %>% 
+  arrange(time) %>% 
+  mutate(time_cut = cut(time, breaks = c(0:t.future))) %>% 
+  group_by(time_cut) %>% 
+  summarise(pct_pos_med = median(sim_pct_pos),
+            pct_pos_25th = quantile(sim_pct_pos, 0.25),
+            pct_pos_75th = quantile(sim_pct_pos, 0.75)) %>% 
+  mutate(time = as.numeric(time_cut),
+         Date = last_fit+time-2,
+         Re = 1.4)
+
+```
+
+```{r tests_future_decrease_bias}
+all_stoch_test_sums_decrease_bias <- as.data.frame(rbind(future_runs_tests_decrease_bias_sum_Re08,
+                                                         future_runs_tests_decrease_bias_sum_Re11,
+                                                         future_runs_tests_decrease_bias_sum_Re14)) 
+  ggplot() +
+    theme_bw() +
+    theme(axis.title = element_text(size = 14,
+                                    face = "bold"),
+          axis.text = element_text(size = 12),
+          axis.text.x = element_text(angle = 45,
+                                     hjust = 1),
+          legend.text = element_text(size =14)) +
+  geom_line(data = sf_test %>% 
+                mutate(pct_7dayavg = zoo::rollmean(pct, 7, fill = NA)) %>% 
+                filter(Date >= as.Date("2020-04-23")),
+              aes(x = Date, y = pct_7dayavg),
+            size = 1.1)  +
+  geom_ribbon(data = all_stoch_test_sums_decrease_bias,
+                aes(x = Date, ymin = pct_pos_25th, ymax = pct_pos_75th, 
+                    fill = as.factor(Re)),
+                alpha = 0.3)+
+  geom_line(data = all_stoch_test_sums_decrease_bias,
+            aes(x = Date, y = pct_pos_med,
+                col = as.factor(Re)),
+            size = 1.2, lty = 2) +
+    scale_fill_manual(values = c("gold1", "darkorange", "firebrick"),
+                       labels = c("Re->0.8",
+                                  "Re->1.1",
+                                  "Re->1.4")) +
+    scale_color_manual(values = c("gold1", "darkorange", "firebrick"),
+                       labels = c("Re->0.8",
+                                  "Re->1.1",
+                                  "Re->1.4")) +
+  labs(x = "Date", y = "% Positive tests (7-day average)",
+       title = "Future Positive test percentages under different transmission scenarios",
+       subtitle = paste("  Assuming", proj_tests_per_day, "tests per day, B=", round(bias_reduced)),
+       fill = "", col = "")
+
+```
+
+```{r comp_bias_reduce}
+all_stoch_test_sums2 <- all_stoch_test_sums %>% 
+  mutate(bias = "Estimated")
+
+all_stoch_test_sums_decrease_bias2 <- all_stoch_test_sums_decrease_bias %>% 
+  mutate(bias = "Reduced")
+
+all_stoch_test_sums_bias_and_normal <- rbind(all_stoch_test_sums2,
+                                             all_stoch_test_sums_decrease_bias2)
+
+ggplot() +
+  theme_bw() +
+  theme(axis.title = element_text(size = 14,
+                                  face = "bold"),
+        axis.text = element_text(size = 12),
+        axis.text.x = element_text(angle = 45,
+                                   hjust = 1),
+        legend.text = element_text(size =14)) +
+  geom_line(data = sf_test %>% 
+              mutate(pct_7dayavg = zoo::rollmean(pct, 7, fill = NA)) %>% 
+              filter(Date >= as.Date("2020-04-23")),
+            aes(x = Date, y = pct_7dayavg),
+            size = 1.1)  +
+  geom_line(data = all_stoch_test_sums_bias_and_normal,
+            aes(x = Date, y = pct_pos_med,
+                col = as.factor(Re), lty = bias),
+            size = 1.2) +
+  scale_color_manual(values = c("gold1", "darkorange", "firebrick"),
+                     labels = c("Re->0.8",
+                                "Re->1.1",
+                                "Re->1.4")) +   
+  labs(x = "Date", y = "% Positive tests (7-day average)",
+       title = "Effect of reduced bias on future positive test percentage",
+       fill = "", col = "")
+
+
 ```
 
