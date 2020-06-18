@@ -215,6 +215,30 @@ Working on figuring out reasonable sampling weights to include in model simulati
 # 6/8/2020  
 Have a decent framework for identifying when a testing trigger should be implemented, now just need to work out how to implement it in the models. Because the sampling step takes so long, any model where the sampling is done at every time step is going to take a very long time to run. Was able to find code for a faster random sampling function, but it still takes a long time to run. Think the next step is to have a conversation about whether a reliable trigger can actually come from testing data and if so what it is. Could at the very least compare a testing trigger to a hospital admissions trigger.  
 
+# 6/9/2020  
+Working on developing a message around the testing/bias analysis and how exaclty to formalize it. I think the current analysis is a bit limited in that it only draws on data from SF, does not consider the effects of testing on transmission, does not consider the timing of testing in relation to symptom onset or reporting. Simulating transmission using an agent-based model would help this to some degree and give greater control/tracking of who gets tested and when and how their information is reported. But maybe that defeats the purpose of communicating how to make testing data more useful to more general public health audiences.
+
+# 6/10/2020  
+Dissertation day, but wanted to jot down a few thoughts on the testing analysis.  
+
+* Potential title: "*Improving the utility of COVID19 testing data*"  
+* Analysis: Fit a model to hospitalizations/deaths data along with parameters like incubation period, asymptomatic rate, etc., then simulate epidemics from the fitted model. Next, incorporate empirical testing data on top of these epidemics (e.g. number of tests conducted, pct positive) to estimate a) point prevalence (e.g. prevalence of active infections), b) incidence of new infections, c) incidence of new symptomatic cases d) $\mathcal{R}_e$. Across these four metrics, analyze the ability of different testing strategies to estimate them. Testing strategies could include: fully random sampling, some random sampling plus some panel/longitudinal sampling, biased sampling
+
+# 6/11/2020  
+Working on refining the testing analysis by incorporating testing into the actual model. This involves changing the $H$ compartment to $T_H$, based on the assumption that everyone in the hospital has been tested (maybe could discuss how to incorporate PUI). Also involves adding a $T_I$ compartment for infectious individuals who have been tested. This will build in an assumption that people who have been tested and confirmed positive are not contributing to infection (e.g. they are quarantined/isolated)
+
+# 6/12-15/2020  
+Banged my head against the wall trying to get continuous time ODE models of various sorts to work with testing, but I think adding the testing track of infection that doesn't influence infection dynamics (e.g. tested people assumed to not infect susceptibles) along with transitions from the untested to the tested track was messing things up. Instead filled out the ABM more in order to simulate infection, even without an explicit network. Instead of a network, there's individual variability in risk drawn from a gamm distribution and then adjusted for age based on presumed higher contact rates among middle aged people, and lower contact among the very lowest age group and high age groups. Also some variability in whether people quarantine once they have symptoms and once they're tested and confirmed positive
+
+# 6/16/2020  
+Spent most of the day building on the model fitting+bias estimation in testing data to add a couple different transmission scenarios, re-write some of the testing code to speed it up, run simulations to determine how changes in bias may affect our ability to detect an increase in transmission, etc.
+
+# 6/17/2020  
+Dissertation Day  
+
+# 6/18/2020  
+Working on an outline for the testing paper.
+
 # ABM TODOs  
 ## Network TODOs  
 * Inform random network generation with individual characteristics, e.g. some individuals more "social": higher probability of generating random edges. Currently implemented with `r.net.prob`, but should introduce heterogeneity based on other characteristics rather than have it generated randomly  
