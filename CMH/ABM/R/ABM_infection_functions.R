@@ -239,9 +239,9 @@ test_folks <- function(inf.states, test.prior, test.probs, n.tests){
   weights[!is.na(test.prior)] <- 0
   weights[is.na(weights)] <- 0
   
-  tested <- weighted_Random_Sample(1:length(inf.states),
-                                   weights,
-                                   n.tests)
+  tested <- wrswoR::sample_int_crank(length(inf.states),
+                                     n.tests,
+                                     weights)
   
   pos.tests <- tested[which(inf.states[tested] %in% c("Ip", "Ia", "Im", "Imh", "Ih"))]
   
