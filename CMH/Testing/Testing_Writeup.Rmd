@@ -19,10 +19,6 @@ require(parallel)
 require(deSolve)
 require(tidyverse)
 require(dagitty)
-require(knitcitations)
-  cleanbib()
-  cite_options(cite.style = "numeric",
-               citation_format = "pandoc")
 
 ```
 
