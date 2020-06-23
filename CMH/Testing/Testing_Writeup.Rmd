@@ -1,9 +1,13 @@
 ---
 title: "Early warning signals derived from COVID-19 testing data"
 author: "Christopher M. Hoover, Joshua Schwab, Maya Peterson, Mark van der Laan, others"
+csl: "plos.csl"
+bibliography: "c19ref.bib"
 output: 
-  pdf_document:
+  pdf_document: 
     keep_tex: true
+  word_document:
+    reference_docx: "../../../choover_word_styles.docx"  
 geometry: margin=2cm 
 ---
 
@@ -35,7 +39,7 @@ Areas across the United States and the world are beginning to reopen following t
   - Sensitivity issues  
 
 ### Testing can be earliest indicator of rising infections if conducted/analyzed appropriately  
-Hospitalizations and deaths are more what we're worried about, but these are preceded in time by increase in cases. Since tests can detect infection before these more severe outcomes, they can be an earlier indicator of increases in transmission. A useful summary statistic to estimate the current status of an outbreak is $\mathcal{R}_e$, the expected number of additional cases caused by a single case at any time during the outbreak [CITE]. 
+Hospitalizations and deaths are more what we're worried about, but these are preceded in time by increase in cases. Since tests can detect infection before these more severe outcomes, they can be an earlier indicator of increases in transmission. A useful summary statistic to estimate the current status of an outbreak is $\mathcal{R}_e$, the expected number of additional cases caused by a single case at any time during the outbreak [@gosticPracticalConsiderationsMeasuring2020]. 
 
 ### Testing cannot currently be used to reliably estimate $\mathcal{R}_e$ because of bias due to variability in test-seeking behaviors, test availability (geographically, socioeconomically, etc.)  
 Testing can be used in either passive or active surveillance to monitor the status of ongoing outbreaks. Especially early in the outbreak when testing was not widely available, the set of individuals allowed (wc?) to be tested was restricted. To date, most COVID19 testing data has been passively collected: those with suspected COVID19 exposure or symptoms seek out testing from a healthcare provider, rather than actively being pursued to be tested in a more systematic fashion, e.g. as part of a representative cohort of the population of interest. This introduces considerable bias into epidemiological estimates derived from the testing data, such as $\mathcal{R}_e$. [Review CITEs on passive surveillance and bias] The number of tests available, test-seeking behaviors of different populations/individuals, and [something else] all influence the number of positive tests and the positive test percent in a given location and time (Figure 1, W2; **Maybe could add $\mathcal{R}_e$ to the DAG as a function of $Y$?**). 
@@ -140,3 +144,8 @@ Big question: How inherently different is this really from methods above? Just a
 * Can additional data be collected in order to improve the utility of available testing resources  
   - Intuition is that smart reallocation of testing to do some active surveillance will improve estimation even more than just doing more tests, which I think could/should be one of the main messages  
   - Could maybe start with data from the Mission Study, use it to derive age/race/income? adjusted rates for all of SF, compare to testing data reported for all of SF county at the same time. Could provide an initial estimate of testing bias. Would be even better if we could do record linkage between Mission Study and other testing data  
+  
+  
+# References  
+
+
