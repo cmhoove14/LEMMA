@@ -1,6 +1,4 @@
 base
-RevoUtilsMath
-RevoUtils
 StanHeaders
 ggplot2
 rstan

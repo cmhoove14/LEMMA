@@ -1,34 +1,47 @@
-\documentclass[]{article}
+% Options for packages loaded elsewhere
+\PassOptionsToPackage{unicode}{hyperref}
+\PassOptionsToPackage{hyphens}{url}
+%
+\documentclass[
+]{article}
 \usepackage{lmodern}
 \usepackage{amssymb,amsmath}
 \usepackage{ifxetex,ifluatex}
-\usepackage{fixltx2e} % provides \textsubscript
 \ifnum 0\ifxetex 1\fi\ifluatex 1\fi=0 % if pdftex
   \usepackage[T1]{fontenc}
   \usepackage[utf8]{inputenc}
-\else % if luatex or xelatex
-  \ifxetex
-    \usepackage{mathspec}
-  \else
-    \usepackage{fontspec}
-  \fi
-  \defaultfontfeatures{Ligatures=TeX,Scale=MatchLowercase}
+  \usepackage{textcomp} % provide euro and other symbols
+\else % if luatex or xetex
+  \usepackage{unicode-math}
+  \defaultfontfeatures{Scale=MatchLowercase}
+  \defaultfontfeatures[\rmfamily]{Ligatures=TeX,Scale=1}
 \fi
-% use upquote if available, for straight quotes in verbatim environments
+% Use upquote if available, for straight quotes in verbatim environments
 \IfFileExists{upquote.sty}{\usepackage{upquote}}{}
-% use microtype if available
-\IfFileExists{microtype.sty}{%
-\usepackage{microtype}
-\UseMicrotypeSet[protrusion]{basicmath} % disable protrusion for tt fonts
+\IfFileExists{microtype.sty}{% use microtype if available
+  \usepackage[]{microtype}
+  \UseMicrotypeSet[protrusion]{basicmath} % disable protrusion for tt fonts
 }{}
+\makeatletter
+\@ifundefined{KOMAClassName}{% if non-KOMA class
+  \IfFileExists{parskip.sty}{%
+    \usepackage{parskip}
+  }{% else
+    \setlength{\parindent}{0pt}
+    \setlength{\parskip}{6pt plus 2pt minus 1pt}}
+}{% if KOMA class
+  \KOMAoptions{parskip=half}}
+\makeatother
+\usepackage{xcolor}
+\IfFileExists{xurl.sty}{\usepackage{xurl}}{} % add URL line breaks if available
+\IfFileExists{bookmark.sty}{\usepackage{bookmark}}{\usepackage{hyperref}}
+\hypersetup{
+  pdftitle={Early warning signals derived from COVID-19 testing data},
+  pdfauthor={Christopher M. Hoover, Joshua Schwab, Maya Peterson, Mark van der Laan, others},
+  hidelinks,
+  pdfcreator={LaTeX via pandoc}}
+\urlstyle{same} % disable monospaced font for URLs
 \usepackage[margin=2cm]{geometry}
-\usepackage{hyperref}
-\hypersetup{unicode=true,
-            pdftitle={Early warning signals derived from COVID-19 testing data},
-            pdfauthor={Christopher M. Hoover, Joshua Schwab, Maya Peterson, Mark van der Laan, others},
-            pdfborder={0 0 0},
-            breaklinks=true}
-\urlstyle{same}  % don't use monospace font for urls
 \usepackage{graphicx,grffile}
 \makeatletter
 \def\maxwidth{\ifdim\Gin@nat@width>\linewidth\linewidth\else\Gin@nat@width\fi}
@@ -38,52 +51,14 @@
 % margins by default, and it is still possible to overwrite the defaults
 % using explicit options in \includegraphics[width, height, ...]{}
 \setkeys{Gin}{width=\maxwidth,height=\maxheight,keepaspectratio}
-\IfFileExists{parskip.sty}{%
-\usepackage{parskip}
-}{% else
-\setlength{\parindent}{0pt}
-\setlength{\parskip}{6pt plus 2pt minus 1pt}
-}
-\setlength{\emergencystretch}{3em}  % prevent overfull lines
+% Set default figure placement to htbp
+\makeatletter
+\def\fps@figure{htbp}
+\makeatother
+\setlength{\emergencystretch}{3em} % prevent overfull lines
 \providecommand{\tightlist}{%
   \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
-\setcounter{secnumdepth}{0}
-% Redefines (sub)paragraphs to behave more like sections
-\ifx\paragraph\undefined\else
-\let\oldparagraph\paragraph
-\renewcommand{\paragraph}[1]{\oldparagraph{#1}\mbox{}}
-\fi
-\ifx\subparagraph\undefined\else
-\let\oldsubparagraph\subparagraph
-\renewcommand{\subparagraph}[1]{\oldsubparagraph{#1}\mbox{}}
-\fi
-
-%%% Use protect on footnotes to avoid problems with footnotes in titles
-\let\rmarkdownfootnote\footnote%
-\def\footnote{\protect\rmarkdownfootnote}
-
-%%% Change title format to be more compact
-\usepackage{titling}
-
-% Create subtitle command for use in maketitle
-\newcommand{\subtitle}[1]{
-  \posttitle{
-    \begin{center}\large#1\end{center}
-    }
-}
-
-\setlength{\droptitle}{-2em}
-
-  \title{Early warning signals derived from COVID-19 testing data}
-    \pretitle{\vspace{\droptitle}\centering\huge}
-  \posttitle{\par}
-    \author{Christopher M. Hoover, Joshua Schwab, Maya Peterson, Mark van der Laan,
-others}
-    \preauthor{\centering\large\emph}
-  \postauthor{\par}
-    \date{}
-    \predate{}\postdate{}
-  
+\setcounter{secnumdepth}{-\maxdimen} % remove section numbering
 \usepackage{booktabs}
 \usepackage{longtable}
 \usepackage{array}
@@ -99,6 +74,11 @@ others}
 \usepackage{makecell}
 \usepackage{xcolor}
 
+\title{Early warning signals derived from COVID-19 testing data}
+\author{Christopher M. Hoover, Joshua Schwab, Maya Peterson, Mark van der Laan,
+others}
+\date{}
+
 \begin{document}
 \maketitle
 
@@ -109,7 +89,7 @@ COVID19 testing data is essential to monitor the status of ongoing
 epidemics across the U.S. and the world. Because of the high rate of
 asymptomatic and mildly symptomatic cases that contribute to
 transmission, widespread testing and subsequent contact tracing and
-isolation are necessary to reduce epidemic spread The effective
+isolation are necessary to reduce epidemic spread. The effective
 reproductive rate, \(\mathcal{R}_e\), is a simple measure of
 transmission interpreted as the expected number of new infections
 arising from a single infection at a given time, that can be used to
@@ -118,6 +98,33 @@ monitor the status of an outbreak. Here we discuss estimation of
 methods to correct for inherent biases that currently limit the utility
 of testing as a reliable indicator of the status of the COVID19
 pandemic.
+
+\hypertarget{todo}{%
+\section{TODO:}\label{todo}}
+
+\begin{itemize}
+\tightlist
+\item
+  Update DAG based on Maya and Mark email chain, incorporate time
+  ordering
+
+  \begin{itemize}
+  \tightlist
+  \item
+    How does \(\mathbb{E}(Y(t))/\mathbb{E}(Y(t-7))\) (or something
+    similar) relate to \(\mathcal{R}_e\)?\\
+  \end{itemize}
+\item
+  Decide on data generating mechanism (ABM?)\\
+\item
+  \textbf{With line list data} adjust testing for demographics, zip
+  code, SES, age\\
+\item
+  Estimate \(\mathcal{R}_e\) from testing data adjusted for
+  underreporting using Hospitalizations/Deaths data
+  (\href{https://cmmid.github.io/topics/covid19/global_cfr_estimates.html}{LSHTM
+  method})
+\end{itemize}
 
 \hypertarget{background}{%
 \section{Background}\label{background}}
@@ -351,6 +358,22 @@ even??)}\label{improving-testing-is-this-another-paper-even}}
   \end{itemize}
 \end{itemize}
 
+\hypertarget{potential-figures}{%
+\section{Potential Figures}\label{potential-figures}}
+
+\hypertarget{sf-testing}{%
+\subsection{SF Testing}\label{sf-testing}}
+
+\includegraphics{Testing_Writeup_files/figure-latex/sf_test_plot-1.pdf}
+
+\hypertarget{mathcalr_e-estimation}{%
+\subsection{\texorpdfstring{\(\mathcal{R}_e\)
+estimation}{\textbackslash mathcal\{R\}\_e estimation}}\label{mathcalr_e-estimation}}
+
+Cori et al method {[}1,2{]}
+
+\includegraphics{Testing_Writeup_files/figure-latex/cori_Re-1.pdf}
+
 \hypertarget{references}{%
 \section*{References}\label{references}}
 \addcontentsline{toc}{section}{References}
@@ -362,5 +385,10 @@ et al. Practical considerations for measuring the effective reproductive
 number, Rt. medRxiv. 2020; 2020.06.18.20134858.
 doi:\href{https://doi.org/10.1101/2020.06.18.20134858}{10.1101/2020.06.18.20134858}
 
+\leavevmode\hypertarget{ref-coriNewFrameworkSoftware2013}{}%
+2. Cori A, Ferguson NM, Fraser C, Cauchemez S. A New Framework and
+Software to Estimate Time-Varying Reproduction Numbers During Epidemics.
+American Journal of Epidemiology. 2013;178: 1505--1512.
+doi:\href{https://doi.org/10.1093/aje/kwt133}{10.1093/aje/kwt133}
 
 \end{document}

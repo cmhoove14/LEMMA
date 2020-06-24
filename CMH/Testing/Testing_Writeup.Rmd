@@ -12,18 +12,28 @@ geometry: margin=2cm
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(echo = FALSE,
+                      message = FALSE,
+                      warning = FALSE)
 
 require(adaptivetau)
 require(parallel)
 require(deSolve)
-require(tidyverse)
 require(dagitty)
+require(EpiEstim)
+require(tidyverse)
 
 ```
 
 ## Abstract  
-COVID19 testing data is essential to monitor the status of ongoing epidemics across the U.S. and the world. Because of the high rate of asymptomatic and mildly symptomatic cases that contribute to transmission, widespread testing and subsequent contact tracing and isolation are necessary to reduce epidemic spread The effective reproductive rate, $\mathcal{R}_e$, is a simple measure of transmission interpreted as the expected number of new infections arising from a single infection at a given time, that can be used to monitor the status of an outbreak. Here we discuss estimation of $\mathcal{R}_e$ from currently available testing data and proprose methods to correct for inherent biases that currently limit the utility of testing as a reliable indicator of the status of the COVID19 pandemic.  
+COVID19 testing data is essential to monitor the status of ongoing epidemics across the U.S. and the world. Because of the high rate of asymptomatic and mildly symptomatic cases that contribute to transmission, widespread testing and subsequent contact tracing and isolation are necessary to reduce epidemic spread. The effective reproductive rate, $\mathcal{R}_e$, is a simple measure of transmission interpreted as the expected number of new infections arising from a single infection at a given time, that can be used to monitor the status of an outbreak. Here we discuss estimation of $\mathcal{R}_e$ from currently available testing data and proprose methods to correct for inherent biases that currently limit the utility of testing as a reliable indicator of the status of the COVID19 pandemic.  
+
+# TODO:  
+* Update DAG based on Maya and Mark email chain, incorporate time ordering  
+  - How does $\mathbb{E}(Y(t))/\mathbb{E}(Y(t-7))$ (or something similar) relate to $\mathcal{R}_e$?  
+* Decide on data generating mechanism (ABM?)  
+* **With line list data** adjust testing for demographics, zip code, SES, age  
+* Estimate $\mathcal{R}_e$ from testing data adjusted for underreporting using Hospitalizations/Deaths data ([LSHTM method](https://cmmid.github.io/topics/covid19/global_cfr_estimates.html))  
 
 # Background   
 ## COVID19  
@@ -142,6 +152,138 @@ Big question: How inherently different is this really from methods above? Just a
   - Could maybe start with data from the Mission Study, use it to derive age/race/income? adjusted rates for all of SF, compare to testing data reported for all of SF county at the same time. Could provide an initial estimate of testing bias. Would be even better if we could do record linkage between Mission Study and other testing data  
   
   
+  
+# Potential Figures  
+```{r SF_data}
+#Downloads data into dataframe called latest_covid_CA
+source("../Get_COVID_Cal_counties_latest.R")
+
+SF.pop <- 883305
+
+sf_hosp <- read.csv(url("https://data.sfgov.org/resource/nxjg-bhem.csv")) %>% 
+  mutate(Date = as.Date(reportdate),
+         type = ifelse(dphcategory == "ICU", "ICU", "HOSP"),
+         conf = ifelse(covidstatus == "PUI", "PUI", "CONF"),
+         hosp_stat = paste(type, conf, sep = "_")) %>% 
+  pivot_wider(names_from = hosp_stat,
+              values_from = patientcount) %>%
+  group_by(Date) %>% 
+  summarise(ICU_PUI = sum(ICU_PUI, na.rm = T),
+            ICU_CONF = sum(ICU_CONF, na.rm = T),
+            HOSP_PUI = sum(HOSP_PUI, na.rm = T),
+            HOSP_CONF = sum(HOSP_CONF, na.rm = T)) %>% 
+  arrange(Date) %>% 
+  mutate(HOSP_tot = ICU_CONF + HOSP_CONF,
+         HOSP_max = ICU_CONF + HOSP_CONF + ICU_PUI + HOSP_PUI,
+         cumICUconf = cumsum(ICU_CONF),
+         cumICUpui = cumsum(ICU_PUI),
+         cumHOSPconf = cumsum(HOSP_CONF),
+         cumHOSPpui = cumsum(HOSP_PUI))
+
+sf_case <- read.csv(url("https://data.sfgov.org/resource/tvq9-ec9w.csv")) %>% 
+  mutate(Date = as.Date(specimen_collection_date)) %>% 
+  pivot_wider(names_from = case_disposition,
+              values_from = case_count) %>% 
+  group_by(Date) %>% 
+  summarise(Cases = sum(Confirmed, na.rm = T),
+            Deaths = sum(Death, na.rm = T)) %>% 
+  arrange(Date) %>% 
+  mutate(cum_case = cumsum(Cases),
+         cum_death = cumsum(Deaths))
+
+sf_test <- read.csv(url("https://data.sfgov.org/resource/nfpa-mg4g.csv")) %>% 
+  mutate(Date = as.Date(specimen_collection_date)) %>% 
+  arrange(Date) %>% 
+  mutate(cum_tests = cumsum(tests),
+         cum_pos = cumsum(pos))
+
+sf_all <- sf_test %>% 
+  dplyr::select(Date, tests, pos, neg, pct, indeterminate, cum_tests, cum_pos) %>%
+  full_join(sf_case, by = "Date") %>% 
+  full_join(sf_hosp, by = "Date") %>% 
+  mutate(time = as.integer(Date - as.Date("2020-02-29"))) %>% 
+  filter(time >0)
+
+```
+
+## SF Testing  
+```{r sf_test_plot}
+sf_test_plot_df <- sf_test %>% 
+  mutate(tests_10k = (tests/SF.pop)*10000,
+         tests_7dayavg = zoo::rollmean(tests,7,na.pad = T,align = "right"),
+         tests10k_7dayavg = zoo::rollmean(tests_10k,7,na.pad = T,align = "right"),
+         pct_7day_avg = zoo::rollmean(pct*100,7,na.pad = T,align = "right")) %>%
+  dplyr::select(Date, tests10k_7dayavg, pct_7day_avg) %>% 
+  pivot_longer(-Date, names_to = "Test", values_to = "Num")
+
+test_plot <- sf_test_plot_df %>% 
+  ggplot() +
+    geom_line(aes(x = Date, y = Num, col = Test),
+              size = 1.1) +
+    theme_bw() +
+    scale_color_manual(values = c("purple", "gold"),
+                       labels = c("% Positive",
+                                  "Tests\nconducted/10k")) +
+    scale_x_date(date_labels = "%m/%d", 
+               date_breaks = "7 day") +
+    theme(axis.title = element_text(size = 14,
+                                    face = "bold"),
+          axis.text = element_text(size = 12),
+          axis.text.x = element_text(angle = 45,
+                                     hjust = 1)) +
+    labs(x = "Date",
+         y = "Tests and %Positive (7-day average)",
+         col = "",
+         title = "COVID19 testing in SF")
+
+test_plot
+
+```
+
+## $\mathcal{R}_e$ estimation  
+Cori et al method [@coriNewFrameworkSoftware2013; @gosticPracticalConsiderationsMeasuring2020]
+
+```{r cori_Re}
+# Get times for estimation
+sf_inc <- as.numeric(sf_all %>% filter(Date >as.Date("2020-03-05")) %>% pull(pos) %>% na.omit())
+window = 7
+ts <- 2:(length(sf_inc)-(window+1))
+te <- 2:(length(sf_inc)-(window+1))+window
+
+R_config <- EpiEstim::make_config(t_start = ts,
+                                  t_end = te,
+                                  mean_si = 4.5,
+                                  std_si = 1)
+
+SF_cori_R <- EpiEstim::estimate_R(incid = sf_inc,
+                                  method = "parametric_si",
+                                  config = R_config)
+
+SF_cori_R$R %>%
+  mutate(Date = as.Date("2020-03-05")+t_start) %>% 
+  ggplot() +
+    theme_bw() +
+    geom_col(data = sf_case,
+             aes(x = Date, y = (Cases/9e5)*1e5),
+             fill = "blue", col = "darkblue", alpha = 0.3) +
+    geom_line(aes(x = Date, y = `Median(R)`),
+              size = 1.2, col = "red") +
+    geom_ribbon(aes(x = Date, y = `Median(R)`,
+                   ymin = `Quantile.0.025(R)`,
+                   ymax = `Quantile.0.975(R)`),
+                fill = "red", alpha = 0.4) +
+    scale_x_date(date_labels = "%m/%d", 
+               date_breaks = "7 day") +
+    theme(axis.title = element_text(size = 14,
+                                    face = "bold"),
+          axis.text = element_text(size = 12),
+          axis.text.x = element_text(angle = 45,
+                                     hjust = 1)) +
+    scale_y_continuous(breaks = c(1,3,5,7)) +
+    labs(x = "Date",
+         y = expression(R[e]~estimate),
+         title = "Cori et al estimate of R through time from SF testing data")
+
+```  
+  
 # References  
-
-

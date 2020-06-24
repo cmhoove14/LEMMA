@@ -239,6 +239,18 @@ Dissertation Day
 # 6/18/2020  
 Working on an outline for the testing paper.
 
+# 6/19/2020  
+Worked on testing paper text and concepts a bit more  
+
+# 6/22/2020  
+Started working on IRB, more research for testing analysis, more work on paper  
+
+# 6/23/2020  
+Work on integrating Rstudio and Overleaf for easy collaboration on paper. Work on reproducing Rt estimation from [Gostic et al](https://www.medrxiv.org/content/10.1101/2020.06.18.20134858v1). More work on IRB text for SFDPH and CDPH line list COVID data  
+
+# 6/24/2020  
+Dissertation Day
+
 # ABM TODOs  
 ## Network TODOs  
 * Inform random network generation with individual characteristics, e.g. some individuals more "social": higher probability of generating random edges. Currently implemented with `r.net.prob`, but should introduce heterogeneity based on other characteristics rather than have it generated randomly  
