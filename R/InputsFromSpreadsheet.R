@@ -1,5 +1,21 @@
-ReadExcel <- function(path, col_types, sheet, range = NULL) {
-  x <- as.data.table(readxl::read_excel(path = path, col_types = col_types, sheet = sheet, range = range))
+#' Run Credibility Interval based on Excel inputs
+#'
+#' @param input.file A .xlsx file
+#' @return list with all outputs (invisible)
+#' @export
+CredibilityIntervalFromExcel <- function(input.file) {
+  sheets <- ReadInputs(input.file)
+  inputs <- ProcessSheets(sheets, input.file)
+
+  cred.int <- CredibilityInterval(inputs)
+  cat("\nDone\n\n")
+  cat("Current LEMMA version: ", getNamespaceVersion("LEMMA"), "\n")
+  cat("LEMMA is in early development. Please reinstall from github daily.\n")
+  invisible(cred.int)
+}
+
+ReadExcel <- function(path, col_types = "guess", sheet, ...) {
+  x <- as.data.table(readxl::read_excel(path = path, col_types = col_types, sheet = sheet, ...))
   attr(x, "sheetname") <- sheet
   return(x)
 }
@@ -11,170 +27,94 @@ TableToList <- function(x) {
   return(as.list(values))
 }
 
-DistToList <- function(x) {
-  names1 <- x$internal.name
-  values <- list()
-  for (i in 1:nrow(x)) {
-    xx <- x[i]
-    values[[i]] <- lapply(x[i][, c("low", "midlow", "mid", "midhigh", "high")], function (z) unlist(z[[1]]))
-  }
-  names(values) <- names1
-  lst <- as.list(values)
-  return(lst)
-}
+ToString <- function(sheets) {
+  #Make a human readable string from the raw Excel input
 
-Unlist <- function(zz) {
-  #regular 'unlist' causes problems with dates
-  do.call(c, zz)
-}
+  sheets$time.of.run <- as.character(Sys.time())
+  sheets$LEMMA.version <- getNamespaceVersion("LEMMA")
 
-SampleParam <- function(p, probs, niter) {
-  p <- Unlist(p)
-  if (class(p) == "logical") {
-    return(sample(p, size = niter, replace = T, prob = probs))
-  }
-  discrete <- sample(p, size = 1000, replace = T, prob = probs)
-  cont <- rnorm(niter, mean = mean(discrete), sd = sd(discrete))
-  if (class(p) == "Date") {
-   x <- as.Date(round(cont), origin = "1970-01-01")
-  } else if (class(p) == "numeric") {
-    x <- pmax(0, cont) #all parameters are >= 0
-    if (all(p == round(p))) {
-      x <- round(x) #if inputs are integers, return integers
-      if (all(p > 0)) {
-        x <- pmax(1, x) #don't return 0 unless it was an input
-      }
-    } else {
-      x <- pmax(min(p) / 10, x) #don't return 0 unless it was an input
-    }
-  } else {
-    stop("unexpected class in SampleParam")
-  }
-  return(x)
-}
-
-GetParams <- function(param.dist, niter, get.upp) {
-  probs <- unlist(param.dist$parameter.weights)
-  stopifnot(sum(probs) == 1)
-
-  weight.labels <- param.dist$weight.labels
-  param.dist1 <- param.dist
-  param.dist1$parameter.weights <- param.dist1$weight.labels <-  NULL
-  if (get.upp) {
-    params <- lapply(param.dist1, function (z) z$mid)
-  } else {
-    params <- lapply(param.dist1, SampleParam, niter = niter, probs = probs)
-  }
-  params <- as.data.table(params)
-  params[, exposed.to.hospital := latent.period + infectious.to.hospital]
-  params$infectious.to.hospital <- NULL
-  return(params)
+  prev.width <- getOption("width")
+  options(width = 300)
+  all.inputs.str <- utils::capture.output(print(sheets))
+  options(width = prev.width)
+  all.inputs.str <- c("NOTE: set font to Courier to read", all.inputs.str)
+  return(all.inputs.str)
 }
 
 ReadInputs <- function(path) {
-  sheets <- list(ReadExcel(path, col_types = c("text", "text", "list", "list", "list", "list", "list", "skip"), sheet = "Parameters with Distributions"), 
+  sheets <- list(ReadExcel(path, sheet = "Parameters with Distributions"),
                  ReadExcel(path, col_types = c("text", "text", "list"), sheet = "Model Inputs"),
-                 ReadExcel(path, col_types = c("date", "numeric", "numeric", "skip"), sheet = "Hospitilization Data"),
-                 ReadExcel(path, col_types = c("text", "list", "skip"), sheet = "Internal"))
+                 ReadExcel(path, sheet = "Interventions", skip = 2),
+                 ReadExcel(path, sheet = "Data", skip = 3),
+                 ReadExcel(path, sheet = "PUI Details", skip = 4),
+                 ReadExcel(path, col_types = c("text", "list", "skip", "skip"), sheet = "Internal"))
   names(sheets) <- sapply(sheets, function (z) attr(z, "sheetname"))
-
-  
   sheets <- rapply(sheets, as.Date, classes = "POSIXt", how = "replace") #convert dates
-  sheets$`Parameters with Distributions` <- sheets$`Parameters with Distributions`[1:(which.max(is.na(internal.name)) - 1)]
   return(sheets)
 }
 
-ProcessSheets <- function(sheets, path, generate.params = TRUE) {
-  param.dist <- DistToList(sheets$`Parameters with Distributions`)
+AddInterventions <- function(interventions, max.date) {
+  interval <- 14
+
+  min.date <- min(interventions$mu_t_inter)
+  d.set <- seq(max.date, min.date, by = "-1 day")
+  for (i in seq_along(d.set)) {
+    d <- d.set[i]
+    if (min(abs(as.numeric(interventions$mu_t_inter - d))) > interval) {
+      if (i == 1) {
+        sd1 <- 0.1
+      } else {
+        sd1 <- 0.3
+      }
+      new.int <- data.table(mu_t_inter = d, sigma_t_inter = 2, mu_beta_inter = 1, sigma_beta_inter = sd1, mu_len_inter = 7, sigma_len_inter = 2)
+      interventions <- rbind(interventions, new.int)
+    }
+  }
+  setkey(interventions, "mu_t_inter")
+  return(interventions)
+}
+
+ProcessSheets <- function(sheets, path) {
+  # seir_inputs <- list()
+  params <- sheets$`Parameters with Distributions`[, .(name = internal.name, mu = Mean, sigma = `Standard Deviation`)]
+  params[, sigma := pmax(sigma, mu / 100)] #Stan crashes if sigma = 0
+  frac_pui <- sheets$`PUI Details`[, .(name = internal.name, mu = Mean, sigma = `Standard Deviation`)]
+  frac_pui[, sigma := pmax(sigma, mu / 100)]
+
   model.inputs <- TableToList(sheets$`Model Inputs`)
-  if (!("start.display.date" %in% names(model.inputs))) {
-    model.inputs$start.display.date <- as.Date("2020/3/1")
-  }
-  hosp.data <- sheets$`Hospitilization Data`
-  internal <- TableToList(sheets$Internal)
-  if (!("plot.observed.data.long.term" %in% names(internal))) {
-    internal$plot.observed.data.long.term <- FALSE
-  }
-  if (!("plot.observed.data.short.term" %in% names(internal))) {
-    internal$plot.observed.data.short.term <- TRUE
-  }
-  if (!("lower.bound.label" %in% names(internal))) {
-    internal$lower.bound.label <- "Confirmed COVID19"
-  }
-  if (!("upper.bound.label" %in% names(internal))) {
-    internal$upper.bound.label <- "Probable COVID19"
-  }
-  
+  internal.args <- TableToList(sheets$Internal)
+  interventions <- sheets$Interventions
+  obs.data <- sheets$Data
 
-  observed.data <- hosp.data[, .(date = Date, hosp = (LowerBound + UpperBound) / 2)] #TODO: make this more flexible?
-  if (!is.na(internal$min.obs.date.to.fit)) {
-    observed.data <- observed.data[date >= internal$min.obs.date.to.fit]
+  all.na <- rowAlls(is.na(as.matrix(obs.data[, -"date"])))
+  obs.data <- obs.data[all.na == F]
+
+  if (is.null(internal.args$automatic.interventions)) {
+    internal.args$automatic.interventions <- T #this was left off early versions
   }
-  if (!is.na(internal$max.obs.date.to.fit)) {
-    observed.data <- observed.data[date <= internal$max.obs.date.to.fit]
+  if ("skip1" %in% names(interventions)) {
+    interventions$skip1 <- interventions$skip2 <- NULL #these are just notes, but not in all versions
+  }
+  interventions[, sigma_t_inter := pmax(sigma_t_inter, 0.01)]
+  interventions[, sigma_beta_inter := pmax(sigma_beta_inter, 0.001)]
+  interventions[, sigma_len_inter := pmax(sigma_len_inter, 0.01)]
+  if (internal.args$automatic.interventions) {
+    interventions <- AddInterventions(interventions, max.date = obs.data[, max(date)])
   }
 
-  hosp.bounds <- hosp.data[, .(date = Date, lower = LowerBound, upper = UpperBound)]
-
-  set.seed(internal$random.seed)
-  if (generate.params) {
-    params <- GetParams(param.dist, internal$main.iterations, get.upp = F)
-  } else {
-    params <- data.table()
+  if (is.na(internal.args$output.filestr)) {
+    internal.args$output.filestr <- sub(".xlsx", " output", path, fixed = T)
   }
-  upp <- GetParams(param.dist, internal$main.iterations, get.upp = T)
-
-  if (is.na(internal$output.filestr)) {
-    internal$output.filestr <- sub(".xlsx", " output", path, fixed = T)
+  if (internal.args$add.timestamp.to.filestr) {
+    internal.args$output.filestr <- paste0(internal.args$output.filestr, date())
   }
-  sheets$time.of.run <- as.character(Sys.time())
-  sheets$LEMMA.version <- getNamespaceVersion("LEMMA")
- 
-  return(list(all.params = params, model.inputs = model.inputs, hosp.bounds = hosp.bounds, observed.data = observed.data, internal.args = internal, upp.params = upp, excel.input = sheets, param.dist = param.dist))
+  if (is.na(internal.args$cores)) {
+    internal.args$cores <- parallel::detectCores()
+  }
+
+  all.inputs.str <- ToString(sheets)
+  return(list(params = params, frac_pui = frac_pui, model.inputs = model.inputs, internal.args = internal.args, interventions = interventions, obs.data = obs.data, all.inputs.str = all.inputs.str))
 }
 
-#' Run Credibility Interval based on Excel inputs
-#'
-#' @param input.file A .xlsx file
-#' @return list with all outputs (invisible)
-#' @export
-CredibilityIntervalFromExcel <- function(input.file) {
-  sheets <- ReadInputs(input.file)
-  inputs <- ProcessSheets(sheets, input.file)
 
-  cred.int <- CredibilityInterval(all.params = inputs$all.params, model.inputs = inputs$model.inputs, hosp.bounds = inputs$hosp.bounds, upp.params = inputs$upp.params, observed.data = inputs$observed.data, internal.args = inputs$internal.args, extras = inputs$excel.input)
-  cat("\nDone\n\n")
-  cat("Current LEMMA version: ", inputs$excel.input$LEMMA.version, "\n")
-  cat("LEMMA is in early development. Please reinstall from github daily.\n")
-  invisible(c(cred.int, inputs = list(inputs)))
-}
 
-#' Run Credibility Interval based on Excel inputs
-#'
-#' @param input.file A .xlsx file
-#' @return a ggplot object
-#' @export
-VaryOneParameter <- function(input.file, parameter.name = "") {
-  sheets <- ReadInputs(input.file)
-  inputs <- ProcessSheets(sheets, input.file, generate.params = F)
-  params <- inputs$upp.params
-  if (parameter.name %in% names(params)) {
-    parameter.range <- Unlist(inputs$param.dist[[parameter.name]])
-    params <- params[rep(1, length(parameter.range))]
-    params[[parameter.name]] <- parameter.range
-  } else {
-    cat("parameter.name needs to be one of the following:\n")
-    print(names(params))
-    stop("unrecognized parameter.name")
-  }
-  date.range <- seq(inputs$model.inputs$start.display.date, inputs$model.inputs$end.date, by = "day")
-  sim <- RunSim1(params1 = params, model.inputs = inputs$model.inputs, observed.data = inputs$observed.data, internal.args = inputs$internal.args, date.range = date.range)
-  
-  colnames(sim$hosp) <- parameter.range
-  dt.plot <- melt(data.table(date = as.Date(rownames(sim$hosp)), sim$hosp), id = "date", value.name = "Hospitalizations", variable.name = "parameter")
-  gplot <- ggplot(dt.plot, aes(x=date, y=Hospitalizations, group = parameter)) +
-    xlab("Date") + 
-    geom_line(aes(color = parameter)) +
-    scale_color_hue(name = parameter.name)
-   return(list(gplot = gplot, sim = sim)) 
-}

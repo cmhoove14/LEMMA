@@ -1,8 +1,12 @@
-# LEMMA 0.3.0.9006
+# LEMMA 0.5.0.9001
 
-## Minor improvements and fixes
-* Fixed rare "q[[i]][tt, , ] > -1e-05 are not all TRUE" problem
+## New Features
+* Moved credibility interval calculation to Stan based on the Santa Cruz County COVID-19 Model (https://github.com/jpmattern/seir-covid19). Many thanks to Jann Paul Mattern and Mikala Caton!
 
+# LEMMA 0.4.0.9000
+
+## New Features
+* Added fitting to ICU, deaths and cumulative hospital admissions
 
 # LEMMA 0.3.0.9005
 
