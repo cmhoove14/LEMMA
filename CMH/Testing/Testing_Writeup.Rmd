@@ -1,7 +1,7 @@
 ---
 title: "Early warning signals derived from COVID-19 testing data"
 author: "Christopher M. Hoover, Joshua Schwab, Maya Peterson, Mark van der Laan, others"
-csl: "plos.csl"
+csl: "../../../plos.csl"
 bibliography: "c19ref.bib"
 output: 
   pdf_document: 
@@ -21,6 +21,7 @@ require(parallel)
 require(deSolve)
 require(dagitty)
 require(EpiEstim)
+require(surveillance)
 require(tidyverse)
 
 ```
@@ -65,7 +66,7 @@ delta -> dW2
 delta -> dY
 }")
 
-coordinates( dag ) <-
+dagitty::coordinates( dag ) <-
   list( x=c(W1=0, W2=0, delta=1, Y = 2, dW2=2, dY=3),
         y=c(W1=-3, W2=-2, delta=-1, Y = -2.5, dW2=-2, dY=-2) )
 plot( dag )
@@ -154,55 +155,11 @@ Big question: How inherently different is this really from methods above? Just a
   
   
 # Potential Figures  
-```{r SF_data}
-#Downloads data into dataframe called latest_covid_CA
-source("../Get_COVID_Cal_counties_latest.R")
+```{r get_data}
+#Downloads statewide data into dataframes called CA_cases, CA_tests, CA_hosp
+source("../Data/Get_COVID_Cal_latest.R")
 
 SF.pop <- 883305
-
-sf_hosp <- read.csv(url("https://data.sfgov.org/resource/nxjg-bhem.csv")) %>% 
-  mutate(Date = as.Date(reportdate),
-         type = ifelse(dphcategory == "ICU", "ICU", "HOSP"),
-         conf = ifelse(covidstatus == "PUI", "PUI", "CONF"),
-         hosp_stat = paste(type, conf, sep = "_")) %>% 
-  pivot_wider(names_from = hosp_stat,
-              values_from = patientcount) %>%
-  group_by(Date) %>% 
-  summarise(ICU_PUI = sum(ICU_PUI, na.rm = T),
-            ICU_CONF = sum(ICU_CONF, na.rm = T),
-            HOSP_PUI = sum(HOSP_PUI, na.rm = T),
-            HOSP_CONF = sum(HOSP_CONF, na.rm = T)) %>% 
-  arrange(Date) %>% 
-  mutate(HOSP_tot = ICU_CONF + HOSP_CONF,
-         HOSP_max = ICU_CONF + HOSP_CONF + ICU_PUI + HOSP_PUI,
-         cumICUconf = cumsum(ICU_CONF),
-         cumICUpui = cumsum(ICU_PUI),
-         cumHOSPconf = cumsum(HOSP_CONF),
-         cumHOSPpui = cumsum(HOSP_PUI))
-
-sf_case <- read.csv(url("https://data.sfgov.org/resource/tvq9-ec9w.csv")) %>% 
-  mutate(Date = as.Date(specimen_collection_date)) %>% 
-  pivot_wider(names_from = case_disposition,
-              values_from = case_count) %>% 
-  group_by(Date) %>% 
-  summarise(Cases = sum(Confirmed, na.rm = T),
-            Deaths = sum(Death, na.rm = T)) %>% 
-  arrange(Date) %>% 
-  mutate(cum_case = cumsum(Cases),
-         cum_death = cumsum(Deaths))
-
-sf_test <- read.csv(url("https://data.sfgov.org/resource/nfpa-mg4g.csv")) %>% 
-  mutate(Date = as.Date(specimen_collection_date)) %>% 
-  arrange(Date) %>% 
-  mutate(cum_tests = cumsum(tests),
-         cum_pos = cumsum(pos))
-
-sf_all <- sf_test %>% 
-  dplyr::select(Date, tests, pos, neg, pct, indeterminate, cum_tests, cum_pos) %>%
-  full_join(sf_case, by = "Date") %>% 
-  full_join(sf_hosp, by = "Date") %>% 
-  mutate(time = as.integer(Date - as.Date("2020-02-29"))) %>% 
-  filter(time >0)
 
 ```
 
@@ -246,14 +203,14 @@ Cori et al method [@coriNewFrameworkSoftware2013; @gosticPracticalConsiderations
 ```{r cori_Re}
 # Get times for estimation
 sf_inc <- as.numeric(sf_all %>% filter(Date >as.Date("2020-03-05")) %>% pull(pos) %>% na.omit())
-window = 7
+window = 2
 ts <- 2:(length(sf_inc)-(window+1))
 te <- 2:(length(sf_inc)-(window+1))+window
 
 R_config <- EpiEstim::make_config(t_start = ts,
                                   t_end = te,
-                                  mean_si = 4.5,
-                                  std_si = 1)
+                                  mean_si = 7,
+                                  std_si = 4)
 
 SF_cori_R <- EpiEstim::estimate_R(incid = sf_inc,
                                   method = "parametric_si",
@@ -264,7 +221,7 @@ SF_cori_R$R %>%
   ggplot() +
     theme_bw() +
     geom_col(data = sf_case,
-             aes(x = Date, y = (Cases/9e5)*1e5),
+             aes(x = Date, y = (Cases/SF.pop)*1e5),
              fill = "blue", col = "darkblue", alpha = 0.3) +
     geom_line(aes(x = Date, y = `Median(R)`),
               size = 1.2, col = "red") +
@@ -272,6 +229,7 @@ SF_cori_R$R %>%
                    ymin = `Quantile.0.025(R)`,
                    ymax = `Quantile.0.975(R)`),
                 fill = "red", alpha = 0.4) +
+    geom_hline(yintercept = 1, lty = 2) +
     scale_x_date(date_labels = "%m/%d", 
                date_breaks = "7 day") +
     theme(axis.title = element_text(size = 14,
@@ -281,9 +239,310 @@ SF_cori_R$R %>%
                                      hjust = 1)) +
     scale_y_continuous(breaks = c(1,3,5,7)) +
     labs(x = "Date",
-         y = expression(R[e]~estimate),
+         y = expression(paste(R[e], " estimate/cases reported per 100k SF residents")),
          title = "Cori et al estimate of R through time from SF testing data")
 
 ```  
   
+## Underreporting estimates via LSHTM method  
+
+```{r LSHTM_underreporting}
+# Reproducing analysis presented at https://cmmid.github.io/topics/covid19/global_cfr_estimates.html for Bay area counties 
+
+# ---------------------------------------------------------
+# Functions from repository
+# setting functions for the delay distribution
+muTransform <- function(zMedian){
+  mu <- log(zMedian) 
+}
+
+sigmaTransform <- function(zMean, mu){
+  sigma <- sqrt(2*(log(zMean) - mu))
+}
+
+# Hospitalisation to death distribution
+hospitalisation_to_death_truncated <- function(x, mu, sigma) {
+  plnorm(x + 1, mu, sigma) - plnorm(x, mu, sigma)
+}
+
+hospitalisation_to_death_truncated_low <- function(x){
+  hospitalisation_to_death_truncated(x, muLow, sigmaLow)
+}
+
+hospitalisation_to_death_truncated_mid <- function(x){
+  hospitalisation_to_death_truncated(x, muMid, sigmaMid)
+}
+
+hospitalisation_to_death_truncated_high <- function(x){
+  hospitalisation_to_death_truncated(x, muHigh, sigmaHigh)
+}
+
+# Function to work out correction CFR
+scale_cfr <- function(data_1_in, delay_fun){
+  case_incidence <- data_1_in$new_cases
+  death_incidence <- data_1_in$new_deaths
+  cumulative_known_t <- 0 # cumulative cases with known outcome at time tt
+  # Sum over cases up to time tt
+  for(ii in 1:nrow(data_1_in)){
+    known_i <- 0 # number of cases with known outcome at time ii
+    for(jj in 0:(ii - 1)){
+      known_jj <- (case_incidence[ii - jj]*delay_fun(jj))
+      known_i <- known_i + known_jj
+    }
+    cumulative_known_t <- cumulative_known_t + known_i # Tally cumulative known
+  }
+  # naive CFR value
+  b_tt <- sum(death_incidence)/sum(case_incidence) 
+  # corrected CFR estimator
+  p_tt <- sum(death_incidence)/cumulative_known_t
+  data.frame(nCFR = b_tt, cCFR = p_tt, total_deaths = sum(death_incidence), 
+             cum_known_t = round(cumulative_known_t), total_cases = sum(case_incidence))
+}
+
+# working out under-reporting estimate and CIs
+underReportingEstimates <- function(data, delay_fun){ 
+  dplyr::group_by(data, county) %>%
+    dplyr::do(scale_cfr(., delay_fun)) %>%
+    dplyr::filter(cum_known_t > 0 & cum_known_t >= total_deaths)  %>%
+    dplyr::mutate(nCFR_UQ = binom.test(total_deaths, total_cases)$conf.int[2],
+                  nCFR_LQ = binom.test(total_deaths, total_cases)$conf.int[1],
+                  cCFR_UQ = binom.test(total_deaths, cum_known_t)$conf.int[2],
+                  cCFR_LQ = binom.test(total_deaths, cum_known_t)$conf.int[1],
+                  underreporting_estimate = cCFRBaseline / (100*cCFR),
+                  lower = cCFREstimateRange[1] / (100 * cCFR_UQ),
+                  upper = cCFREstimateRange[2] / (100 * cCFR_LQ),
+                  quantile25 = binom.test(total_deaths, cum_known_t, conf.level = 0.5)$conf.int[1],
+                  quantile75 = binom.test(total_deaths, cum_known_t, conf.level = 0.5)$conf.int[2]) %>% 
+    dplyr::filter(total_deaths > 10)}
+
+# ---------------------------------------------------------
+
+# ---------------------------------------------------------
+# Code to run estimates from repository
+# ---------------------------------------------------------
+
+# setting the baseline CFR
+cCFRBaseline <- 1.4
+cCFREstimateRange <- c(1.2, 1.7)
+
+#TODO: Update these e.g. from Joe's paper?
+# set parameters of delay distribution -----------------------------------
+
+# lower end of the range
+zmeanLow <- 8.7
+zmedianLow <- 6.7
+muLow <- muTransform(zmedianLow)
+sigmaLow <- sigmaTransform(zmeanLow, muLow)
+
+# middle of the range
+zmeanMid <- 13
+zmedianMid <- 9.1
+muMid <- muTransform(zmedianMid)
+sigmaMid <- sigmaTransform(zmeanMid, muMid)
+
+# upper end of the range
+zmeanHigh <- 20.9
+zmedianHigh <- 13.7
+muHigh <- muTransform(zmedianHigh)
+sigmaHigh <- sigmaTransform(zmeanHigh, muHigh)
+
+# data clean for function
+allTogetherClean <- CA_cases %>% 
+  mutate(date = as.Date(date, format = "%Y-%m-%d")) %>% 
+  dplyr::rename(new_cases = newcountconfirmed,
+                new_deaths = newcountdeaths) %>%
+  filter(county != "Unassigned" & 
+           county != "Out Of Country",
+           totalcountdeaths > 10 & 
+           new_deaths >= 0 & 
+           new_cases >= 0) %>% 
+  dplyr::select(county, date, new_cases, new_deaths) %>% 
+  padr::pad() %>% 
+  drop_na()
+
+# calculate table of estimates using three delay distributions (both ends of the reported ranges and the mean)
+allTogetherLow <- underReportingEstimates(allTogetherClean, hospitalisation_to_death_truncated_low) 
+allTogetherMid <- underReportingEstimates(allTogetherClean, hospitalisation_to_death_truncated_mid) 
+allTogetherHigh <- underReportingEstimates(allTogetherClean, hospitalisation_to_death_truncated_high)
+
+# choosing CIs such that they include all uncertainty from delay distribution
+finalRes <- dplyr::tibble(
+  county = allTogetherMid$county,
+  total_cases = allTogetherMid$total_cases,
+  total_deaths = allTogetherMid$total_deaths,
+  underreporting_estimate  = pmin(allTogetherLow$underreporting_estimate, allTogetherMid$underreporting_estimate, allTogetherHigh$underreporting_estimate),
+  lower = pmin(allTogetherLow$lower, allTogetherMid$lower, allTogetherHigh$lower),
+  upper = pmax(allTogetherLow$upper, allTogetherMid$upper, allTogetherHigh$upper))
+
+# Put estimation into a function to estimate through time  
+underReportingDate <- function(e_date, data){
+  useDat <- data %>% filter(date <= as.Date(e_date))
+  # calculate table of estimates using three delay distributions (both ends of the reported ranges and the mean)
+    allTogetherLow <- underReportingEstimates(useDat, hospitalisation_to_death_truncated_low) 
+    allTogetherMid <- underReportingEstimates(useDat, hospitalisation_to_death_truncated_mid) 
+    allTogetherHigh <- underReportingEstimates(useDat, hospitalisation_to_death_truncated_high)
+
+  # choosing CIs such that they include all uncertainty from delay distribution
+    outDat <- dplyr::tibble(
+      county = allTogetherMid$county,
+      date = as.Date(e_date),
+      total_cases = allTogetherMid$total_cases,
+      total_deaths = allTogetherMid$total_deaths,
+      underreporting_estimate  = pmin(allTogetherLow$underreporting_estimate, allTogetherMid$underreporting_estimate, allTogetherHigh$underreporting_estimate),
+      lower = pmin(allTogetherLow$lower, allTogetherMid$lower, allTogetherHigh$lower),
+      upper = pmax(allTogetherLow$upper, allTogetherMid$upper, allTogetherHigh$upper))
+    
+    return(outDat)
+}
+
+CAunderReporting <- bind_rows(lapply(seq.Date(from = as.Date("2020-04-01"), 
+                                              to = Sys.Date()-14, 
+                                              by = 1),
+                                     underReportingDate,
+                                     data = allTogetherClean))
+
+CAunderReporting %>% 
+  filter(county %in% c("Alameda", "San Francisco", 
+                       "Contra Costa", "Santa Clara",
+                       "Sacramento", "Los Angeles", 
+                       "Riverside", "Orange", "San Diego")) %>% 
+ggplot() +
+  theme_bw() +
+  geom_ribbon(aes(x = date, ymin = lower*100, ymax = upper*100),
+              alpha = 0.2, fill = "blue") +  
+  geom_line(aes(x = date, y = underreporting_estimate*100),
+            size = 1.2, col = "darkblue") +
+  facet_wrap(.~county, ncol = 3, nrow = 3) +
+  scale_x_date(date_labels = "%m/%d", 
+               date_breaks = "14 day") +
+  scale_y_continuous(breaks = c(0,25,50,75,100),
+                     limits = c(0,125)) +
+    theme(axis.title = element_text(size = 14,
+                                    face = "bold"),
+          axis.text = element_text(size = 12),
+          axis.text.x = element_text(angle = 45,
+                                     hjust = 1)) +
+    labs(x = "Date",
+         y = "% Cases reported",
+         title = "Reporting estimates in CA counties",
+         subtitle = "  Estimates based on adjustment from deaths by LSHTM method")
+```
+
+These estimates come from data from the statewide database, but some wonkiness in there (e.g. negative case counts over the weekends sometime), so will reestimate for SF using the county data.
+
+```{r sf_case_adjust_underreporting}
+SF_LSHTM_data <- sf_case %>% 
+  dplyr::mutate(county = "San Francisco") %>% 
+  dplyr::rename(new_cases = Cases,
+                new_deaths = Deaths,
+                date = Date) %>% 
+  dplyr::select(county, date, new_cases, new_deaths)
+
+
+SFunderReporting <- bind_rows(lapply(seq.Date(from = as.Date("2020-04-01"), 
+                                              to = Sys.Date()-14, 
+                                              by = 1),
+                                     underReportingDate,
+                                     data = SF_LSHTM_data))
+
+SF_all2 <- sf_all %>% 
+  dplyr::left_join(as.data.frame(SFunderReporting), by = c("Date" = "date"))
+
+SF_all2 %>% 
+  dplyr::select(Date, tests, pos, pct, Cases, underreporting_estimate) %>% 
+  pivot_longer(-Date, names_to = "Metric",
+               values_to = "Value") %>% 
+  ggplot(aes(x = Date, y = Value)) +
+    theme_bw() +
+    geom_line(size = 1.2) +
+    facet_wrap(Metric~., scales = "free_y", ncol = 1)
+
+SF_all2 %>% 
+  mutate(adj_cases = total_cases*(1+(1-underreporting_estimate))) %>% 
+  pivot_longer(c(total_cases, adj_cases),
+               names_to = "Adjust") %>% 
+  mutate(Cases_p100k = value/SF.pop*1e5) %>% 
+  ggplot() +
+    geom_line(aes(x = Date, y = Cases_p100k, col = Adjust)) +
+    theme_bw()
+  
+
+```
+
+## Back projection from hospitalizations  
+#### TODO: Generate case estimates based on proportion of cases that beome hospitalized  
+#### TODO: Methods for age, race, ethnicity adjustment if given line list data  
+
+```{r backproj, fig.width=8, fig.height=6, fig.align="left"}
+#Function to plot estimates from bootstrapped back projections
+backproj.plot <- function(dat.vec, sts.obj){
+  sts.sum <- as_tibble(t(apply(sts.obj@lambda, 1, function(x){
+    t.sum <- summary(x[1,])
+    return(c(t.sum[c(2,3,5)]))
+  }))) %>% 
+    mutate(obs = dat.vec,
+           time = dplyr::row_number())
+  
+  sts.plot <- sts.sum %>% 
+  ggplot() +
+    theme_bw() +
+    geom_col(aes(x = time, y = obs),
+             fill = "blue", col = "darkblue", alpha = 0.8) +
+    geom_line(aes(x = time, y = Median), size = 1.2) +
+    geom_ribbon(aes(x = time, ymin = `1st Qu.`, ymax = `3rd Qu.`),
+                fill = "grey60", alpha = 0.3) +
+    labs(x = "Time",
+         y = "Hospital admissions and estimated infection series",
+         title = "Backprojection estimates of infection times from Hospital Admissions")
+  
+  return(sts.plot)
+}
+
+# Load distribution of times from onset to hospitalization
+load("../Data/t_i_h_gamma.Rdata")
+
+#PMF of the time from infection to hospitalization truncated at thirty days
+dmax <- 30
+inc.pmf <- c(0,dgamma(c(1:dmax), t_i_h_gamma_pars[1], t_i_h_gamma_pars[2]))
+
+#Function to sample from the incubation time
+rincu <- function(n) {
+  sample(0:dmax, size=n, replace=TRUE, prob=inc.pmf)
+}
+
+# Hospital admissions (the "onsets") as an sts object
+CA_H_Adm <- CA_hosp %>% 
+  mutate(Date = as.Date(todays_date, format = "%Y-%m-%d"),
+         H_admits = previous_days_covid_confirmed_patients,
+         H_suspects = previous_days_suspected_covid_patients) %>% 
+  dplyr::select(Date, county, H_admits, H_suspects) %>% 
+  filter(!is.na(H_admits) & !is.na(Date)) %>% 
+  arrange(county, Date)
+
+SF_H <- CA_H_Adm %>% 
+  filter(county == "San Francisco") %>% 
+  pull(H_admits)
+
+SF_H_pad0 <- c(rep(0,dmax), SF_H)
+
+#Call non-parametric back-projection function 
+bpnp.control <- list(k=2,
+                     eps=rep(0.0001,2),
+                     iter.max=rep(500,2),
+                     B=500,
+                     eq3a.method="C")
+
+SF_H_sts <- new("sts", 
+                epoch=1:length(SF_H_pad0),
+                observed=matrix(SF_H_pad0,ncol=1))
+  
+SF_H_bp <- backprojNP(SF_H_sts, incu.pmf=inc.pmf,
+                      control=bpnp.control)
+
+SF_H_bp_plot <- backproj.plot(SF_H_pad0, SF_H_bp)
+
+SF_H_bp_plot
+```
+
+
 # References  

@@ -251,6 +251,15 @@ Work on integrating Rstudio and Overleaf for easy collaboration on paper. Work o
 # 6/24/2020  
 Dissertation Day
 
+# 6/25/2020  
+Worked on IRB more, will need to wait to here from Berkeley Information Security before submitting probably. Also implemented LSHTM method for estimating degree of underreporting of cases based on case fatality ratio (CFR) adjustment. Estimates for SF county (and most CA counties) suggest steadily rising percentages of all estimated cases reported since early April, with current estimates of ~60% of all cases actually being reported (e.g. tested). Fairly certain this is all symptomatic cases since they're using the case fatality ratio for adjustment, therefore number of infections (e.g. including asymptomatic infections) is higher, which would make the reporting rate even lower. Also worth noting that the cfr is assumed constant through time and across lcoations, so if SF has a lower cfr or if it has decreased over time, these estimates would be biased.
+
+# 6/26/2020  
+Trying to organize thoughts around this testing/estimation of cases business and also try another method to estimate the degree of underreporting of cases. Method is back projection from the `surveillance` package with method described [here](https://www.tandfonline.com/doi/full/10.1080/03610910701792562).
+
+# 6/29/2020  
+Worked on fitting STAN models with more explicit objective of estimating fraction of cases detected through testing. Models were not fitting properly, so going back and trying to fit more incremently with LEMMA stan model as a starting point. Also duid some more research/work/networking re: COVID data acquisition from CDPH. Finished with some updates to the ABM. Will focus on that tomorrow as that's the main goal with the testing analysis.
+
 # ABM TODOs  
 ## Network TODOs  
 * Inform random network generation with individual characteristics, e.g. some individuals more "social": higher probability of generating random edges. Currently implemented with `r.net.prob`, but should introduce heterogeneity based on other characteristics rather than have it generated randomly  
