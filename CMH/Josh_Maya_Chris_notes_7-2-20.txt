@@ -1,0 +1,30 @@
+Two definite adjustment things:
+	-Fact that we can estimate and adjust for hospitalization rates due to age distribution of infections
+	-Adjust for demographics (W, delta, deltaY) for E[y]/E[t-7]
+	-How to adjust for symptomatic in addition to testing strategy
+		-E.g. hospitals have recently started testing everyone for COVID rather than just COVID-suspects
+		-Or e.g. outbreak investigation among e.g. san quentin
+	-Do we take out all the outbreak-associated tests?
+		-Assume that people getting tested just because they're symptomatic
+		-Certain places that are always offering testing: increase in tests or increase in positives may be informative
+	-Mission Study and Bay10 (Bayview/Hunters Point new study?)
+	-Maybe a future goal to optimize testing 
+	-in SF right now:
+		-Testing site in Mission, testing site in Tenderloin, in Embarcadero but very passive: people walking up voluntarily
+		-In hospitals
+		-In nursing homes and shelters (congregate living settings)
+		-Kaiser
+		-Random events
+	-KEY QUESTION: How do we distinguish a rise in infection from a change in testing strategy/availability
+		-What if Flu comes along and is causing big increases in testing?
+			-Will look like R is decreasing, but it's actually more people seeking testing because they have symptoms
+		-How to adjust for things that cause similar symptoms?
+			-Should drive down percent positive
+	** FIND STRATA IN WHICH BIAS IS NOT CHANGING DRASTICALLY THROUGH TIME
+		-Within a given site, testing bias is probably more constant, therefore increase in cases is more likely reflective of increase in cases
+			-E[E[Y]|W,delta] ???
+			-Then ask if we can identify WHERE outbreak is worsening
+				-Conditional on W and site, can we predict risk?
+					-Within a particular strata (of e.g. location, occupation, demographics) is there an outbreak?
+	** Constant bias conditional on W, especially when testing site is included in W
+		

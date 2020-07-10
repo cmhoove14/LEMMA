@@ -1,0 +1,547 @@
+---
+title: "ABM Testing"
+author: "Chris Hoover"
+date: "6/15/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+require(tidyverse)
+```
+
+## Recap  
+Can fit a simple model to data we trust (hospitalizations and/or deaths) and use the resulting simulations to determine the degree of underreporting from testing data if we take the observed testing data as our sample and our model simulations as the truth. can then project into the future with different assumptions about the number of tests available and future transmission conditions (e.g. $\mathcal{R}_e$) to get an idea of what kind of observations in testing data might be cause for concern (e.g. serve as triggers for return to SiP or other interventions) and how these observations/triggers compare with other potential triggers (e.g. hospital admissions).
+
+This analysis is a good starting point, but testing does not influence infection in hte model (maybe this is negligible, but maybe not) and the assumption that the fitted model accurately represents true infection dynamics is quite a stretch. So, building on this analysis with an ABM with testing incorporated in order to get a better idea of how sampling weights (e.g. test-seeking behavior) between infection classes influences the observed number of positive tests, how knowledge/reporting of this heterogeneity may give us better estimates of key metrics like $\mathcal{R}_e$ and incidence, and how we might better allocate testing resources to estimate these metrics.
+
+```{r epi_data}
+if(sum(grepl(Sys.Date(), list.files("../Data"))) == 0){
+  source("../Data/Get_COVID_Cal_latest.R")
+  save.image(file = paste("../Data/CA_SF_data", Sys.Date(), ".Rdata"))
+} else {
+  load(paste("../Data/CA_SF_data", Sys.Date(), ".Rdata"))
+}
+
+```
+
+# ABM Simulations with Testing built in  
+```{r abm_setup, include = FALSE}
+devtools::load_all("../ABM/")
+
+set.seed(430)
+
+# Number of people, key dates, transmission probability 
+# Key Dates
+t0 <- as.Date("2020-02-15")
+last_dat <- max(sf_all %>% na.omit() %>% pull(Date))
+today <- Sys.Date()
+
+# Beta change dates
+db1 <- as.Date("2020-03-05") #Schools closed
+db2 <- as.Date("2020-03-15")     #SiP announced
+db3 <- as.Date("2020-04-15")          #Another knot
+db4 <- as.Date("2020-05-15")          #Another knot
+db5 <- as.Date("2020-06-15")         #Another knot 
+t.end <- as.Date("2020-08-01")         # Where we're headed (for future use)
+
+t.tot <- as.numeric(t.end - t0)
+
+  pop.red <- 10
+  N <- 9e5/pop.red
+  dt = 1/3
+  
+  beta.init <- 0.625 # Corresponds to R0 of ~3
+  
+  beta.time <- cbind(-as.numeric(t0-c(t0, db1,
+                                      db2, db3, db4, db5, t.end)),
+                     beta.init*c(1, 1, 0.6, 0.25, 0.3, 0.5, 0.6))
+  
+beta_smooth <- splinefun(x = beta.time[,1],
+                         y = beta.time[,2],
+                         method = "natural")
+
+abm_beta_fx <- approxfun(c(0:t.tot),
+                         c(rep(beta.init, beta.time[2,1]), sapply(c(beta.time[2,1]+1):(t.tot+1),
+                                                                  beta_smooth)))
+  
+  as.data.frame(cbind(t = c(0:t.tot),
+                      beta = sapply(0:t.tot, abm_beta_fx))*(1/beta.init)) %>% 
+    mutate(Date = as.Date(t0+t)) %>% 
+    ggplot(aes(x = Date, y = beta))+
+      theme_bw() +
+      geom_line() +
+      labs(x = "Date", y = "Relative beta")
+  
+# Tests conducted
+  test_fx <- approxfun(0:t.tot,
+                       c(rep(0, as.numeric(min(sf_test$Date)-t0)+1),
+                         sf_test$tests,
+                         rep(2000, as.numeric(t.end-max(sf_test$Date))))*dt/pop.red,
+                       method = "linear")
+  
+#Testing probabilities of different infection classes
+  prob_test <- c("S" = 0.01,
+                 "E" = 0.01,
+                 "Ip" = 0.01,
+                 "Ia" = 0.01,
+                 "Im" = 0.1,
+                 "Imh" = 0.1,
+                 "Ih" = 1,
+                 "R" = 0.01)
+
+# Age distributions from US census  
+  pop.props <- c(0.06+0.061, 
+                 0.065+0.066, 
+                 0.066+0.5*0.139, 
+                 0.5*0.139+0.5*0.127, 
+                 0.127, 0.5*0.127+0.066, 
+                 0.063+0.5*0.093, 
+                 0.5*0.093+0.5*0.048,
+                 0.5*0.048+0.019)
+  
+  names(pop.props) <- c(seq(0,70,10), 80)  # 80 is anyone older than 80
+  pop.ages <- as.numeric(sample(names(pop.props), size = N/pop.red, replace = TRUE, prob = pop.props))
+  
+# Baseline risk of infection based on age
+  # This gives decent approximation of more risk among age groups that are more active, but could use improvement
+  risks <- rgamma(N/pop.red, 3, 3)*(pop.ages+1)^(1/pop.ages)
+  
+  #hist(risks, breaks = 30, main = "Distribution of individual variability in risk")
+  
+# Quarantine probabilities 
+  q.probs <- rbeta(N/pop.red, 5, 1)
+  
+  #hist(q.probs, breaks = 30, main = "Distribution of individual probability of quarantining given symptoms")
+
+# Infection status through time
+  inf.mat <- matrix(data = NA, nrow = N/pop.red, ncol = t.tot/dt)
+
+# Test status through time
+  test.mat <- matrix(data = NA, nrow = N/pop.red, ncol = t.tot/dt)
+  
+# Event times
+  t.til.nxt <- matrix(data = NA, nrow = N/pop.red, ncol = t.tot/dt)
+  
+
+# Initial conditions
+  e.seed <- 5     #Exposed
+  ip.seed <- 1    #infected pre-symptomatic
+  ia.seed <- 0    #infected asymptomatic
+  im.seed <- 0    #infected mildly symptomatic
+  imh.seed <- 0   #infected mildly symptomatic, will become severe
+  ih.seed <- 0    #infected severely symptomatic
+  d.seed <- 0     #dead
+  r.seed <- 0     #removed
+  s.seed <- N/pop.red - e.seed - ip.seed - ia.seed - im.seed - imh.seed - ih.seed - d.seed - r.seed
+
+# Initialize infection and waiting time matrices    
+init.infection <- sample(c(rep("E", e.seed),
+                           rep("Ip", ip.seed),
+                           rep("Ia", ia.seed),
+                           rep("Im", im.seed),
+                           rep("Imh", imh.seed),
+                           rep("Ih", ih.seed),
+                           rep("D", r.seed),
+                           rep("R", r.seed),
+                           rep("S", s.seed)), N/pop.red, replace = FALSE)
+  
+# Fill infection and state transition matrices based on initial conditions  
+  inf.mat[,1] <- init.infection  
+  t.til.nxt[,1] <- sapply(inf.mat[,1], function(i){
+    if(i == "E"){
+      t_latent()
+    } else if(i == "Ip"){
+      t_presymp()
+    } else if(i == "Ia"){
+      t_asymp()
+    } else if(i == "Im"){
+      t_msymp()
+    } else if(i == "Imh"){
+      t_mtosev()
+    } else if(i == "Ih"){
+      t_sevsymp()
+    } else {
+      NA
+    }
+  })
+  
+```
+
+```{r abm_more_fxs}
+# Simulate infection across population  
+sim.infection <- function(inf.vec, q.vec, risks, bta){
+  infecteds <- which(inf.vec %in% c("Ip", "Ia", "Im", "Imh") &
+                       q.vec == 0)
+  
+  I.tot <- length(infecteds)
+  inf.probs <- 1-exp(-bta*I.tot*risks)
+  S.vec <- which(inf.vec == "S")
+  StoEs <- sapply(S.vec, function(p){
+    rbinom(1,1,inf.probs[p])
+  })
+  return(S.vec[which(StoEs == 1)])
+}  
+
+```
+
+```{r abm_sim, eval = FALSE}
+for(t in 2:(t.tot/dt)){
+  # print(t)
+# Advance transition times
+    t.til.nxt[,t] <- t.til.nxt[,(t-1)]-dt
+  
+  # Advance expired states to next state 
+    nexts <- which(t.til.nxt[,t] < 0) # states that expired
+    if(length(nexts >0)){
+      next.mat <- t(mapply(next_state, inf.mat[nexts,(t-1)], pop.ages[nexts])) # function returns new states and time spent in new state
+      inf.mat[nexts,t] <- next.mat[,1] # update infection status matrix
+      t.til.nxt[nexts,t] <- as.numeric(next.mat[,2]) # update waiting time matrix
+    }
+    
+  # Anyone who hasn't changed infection state remains the same
+    sames <- which(is.na(inf.mat[,t]))
+    inf.mat[sames,t] <- inf.mat[sames,(t-1)]
+
+  # Implement testing
+    n_tests <- round(test_fx(t*dt))
+    test.mat[,t] <- test_folks(inf.mat[,t], test.mat[,(t-1)], prob_test, n_tests)
+    
+  # Implement quarantining  
+    quars <- quarantine(inf.mat[,t], test.mat[,t], q.probs)
+    
+  # Simulate infection
+    beta_t <- abm_beta_fx(t*dt)  
+    new.Es <- sim.infection(inf.mat[,t], quars, risks, beta_t)
+
+  # Update infection status matrix with new Es  
+    inf.mat[new.Es,t] <- "E"
+    
+  # Update transition times matrix for new Es from sample of latent period dist'n
+    t.til.nxt[new.Es,t] <- as.numeric(replicate(length(new.Es), t_latent()))
+  
+  # On to the next one  
+}
+
+pos_tests <- t(apply(test.mat,2,function(x){
+  Ttot = sum(!is.na(x), na.rm = T) ; return(Ttot)
+}))[1,]
+
+tests = round(test_fx(1:(t.tot/dt)*dt))
+
+inf_sum <- as.data.frame(sum_inf_mat(inf.mat)) %>%
+  mutate(t = (t.sim*dt),
+         date = as.character(t0+t),
+         tests = tests,
+         tot_pos = pos_tests,
+         pos = tot_pos-lag(tot_pos)) %>% 
+  group_by(date) %>% 
+  summarise(S = mean(S),
+            E = mean(E),
+            Ip = mean(Ip),
+            Ia =mean(Ia),
+            Im = mean(Im),
+            Imh = mean(Imh),
+            Ih = mean(Ih),
+            R = mean(R),
+            D = mean(D),
+            tests = sum(tests),
+            pos = sum(pos),
+            pct = pos/tests) %>% 
+  mutate(Date = as.Date(date))
+```
+
+```{r abm_call_fx}
+run_abm <- function(...){
+  
+# Ages of agents  
+  pop.ages <- as.numeric(sample(names(pop.props), size = N/pop.red, replace = TRUE, prob = pop.props))
+  
+# Baseline risk of infection based on age
+  # This gives decent approximation of more risk among age groups that are more active, but could use improvement
+  risks <- rgamma(N/pop.red, 2, 2)*(pop.ages+1)^(1/pop.ages)
+  
+  #hist(risks, breaks = 30, main = "Distribution of individual variability in risk")
+  
+# Quarantine probabilities 
+  q.probs <- rbeta(N/pop.red, 5, 1)
+  
+  #hist(q.probs, breaks = 30, main = "Distribution of individual probability of quarantining given symptoms")
+
+# Infection status through time
+  inf.mat <- matrix(data = NA, nrow = N/pop.red, ncol = t.tot/dt)
+
+# Test status through time
+  test.mat <- matrix(data = NA, nrow = N/pop.red, ncol = t.tot/dt)
+  
+# Event times
+  t.til.nxt <- matrix(data = NA, nrow = N/pop.red, ncol = t.tot/dt)
+  
+
+# Initial conditions
+  e.seed <- 5     #Exposed
+  ip.seed <- 1    #infected pre-symptomatic
+  ia.seed <- 0    #infected asymptomatic
+  im.seed <- 0    #infected mildly symptomatic
+  imh.seed <- 0   #infected mildly symptomatic, will become severe
+  ih.seed <- 0    #infected severely symptomatic
+  d.seed <- 0     #dead
+  r.seed <- 0     #removed
+  s.seed <- N/pop.red - e.seed - ip.seed - ia.seed - im.seed - imh.seed - ih.seed - d.seed - r.seed
+
+# Initialize infection and waiting time matrices    
+init.infection <- sample(c(rep("E", e.seed),
+                           rep("Ip", ip.seed),
+                           rep("Ia", ia.seed),
+                           rep("Im", im.seed),
+                           rep("Imh", imh.seed),
+                           rep("Ih", ih.seed),
+                           rep("D", r.seed),
+                           rep("R", r.seed),
+                           rep("S", s.seed)), N/pop.red, replace = FALSE)
+  
+# Fill infection and state transition matrices based on initial conditions  
+  inf.mat[,1] <- init.infection  
+  t.til.nxt[,1] <- sapply(inf.mat[,1], function(i){
+    if(i == "E"){
+      t_latent()
+    } else if(i == "Ip"){
+      t_presymp()
+    } else if(i == "Ia"){
+      t_asymp()
+    } else if(i == "Im"){
+      t_msymp()
+    } else if(i == "Imh"){
+      t_mtosev()
+    } else if(i == "Ih"){
+      t_sevsymp()
+    } else {
+      NA
+    }
+  })
+  
+for(t in 2:(t.tot/dt)){
+  # print(t)
+# Advance transition times
+    t.til.nxt[,t] <- t.til.nxt[,(t-1)]-dt
+  
+  # Advance expired states to next state 
+    nexts <- which(t.til.nxt[,t] < 0) # states that expired
+    if(length(nexts >0)){
+      next.mat <- t(mapply(next_state, inf.mat[nexts,(t-1)], pop.ages[nexts])) # function returns new states and time spent in new state
+      inf.mat[nexts,t] <- next.mat[,1] # update infection status matrix
+      t.til.nxt[nexts,t] <- as.numeric(next.mat[,2]) # update waiting time matrix
+    }
+    
+  # Anyone who hasn't changed infection state remains the same
+    sames <- which(is.na(inf.mat[,t]))
+    inf.mat[sames,t] <- inf.mat[sames,(t-1)]
+
+  # Implement testing
+    n_tests <- round(test_fx(t*dt))
+    test.mat[,t] <- test_folks(inf.mat[,t], test.mat[,(t-1)], prob_test, n_tests)
+    
+  # Implement quarantining  
+    quars <- quarantine(inf.mat[,t], test.mat[,t], q.probs)
+    
+  # Simulate infection
+    beta_t <- abm_beta_fx(t*dt)  
+    new.Es <- sim.infection(inf.mat[,t], quars, risks, beta_t)
+
+  # Update infection status matrix with new Es  
+    inf.mat[new.Es,t] <- "E"
+    
+  # Update transition times matrix for new Es from sample of latent period dist'n
+    t.til.nxt[new.Es,t] <- as.numeric(replicate(length(new.Es), t_latent()))
+  
+  # On to the next one  
+}
+
+pos_tests <- t(apply(test.mat,2,function(x){
+  Ttot = sum(x == "T", na.rm = T) ; return(Ttot)
+}))[1,]
+
+tests = round(test_fx(1:(t.tot/dt)*dt))
+
+inf_sum <- as.data.frame(sum_inf_mat(inf.mat)) %>% 
+  mutate(t = (t.sim*dt),
+         date = as.character(t0+t),
+         tests = tests,
+         tot_pos = pos_tests,
+         pos = tot_pos-lag(tot_pos)) %>% 
+  group_by(date) %>% 
+  summarise(S = mean(S),
+            E = mean(E),
+            Ip = mean(Ip),
+            Ia =mean(Ia),
+            Im = mean(Im),
+            Imh = mean(Imh),
+            Ih = mean(Ih),
+            R = mean(R),
+            D = mean(D),
+            tests = sum(tests),
+            pos = sum(pos),
+            pct = pos/tests) %>% 
+  mutate(Date = as.Date(date))
+
+return(inf_sum)
+}
+```
+
+```{r abm_replicate, eval = FALSE}
+require(parallel)
+
+n.cores <- detectCores()
+
+n.reps <- 15*n.cores
+
+abmclust <- makeCluster(n.cores)         # Make cluster
+clusterExport(abmclust, c("t.tot", "t0", "dt", "N", "pop.red",
+                          "test_fx", "abm_beta_fx", "n.reps",
+                          "pop.props", "prob_test",
+                          "sim.infection",
+                          "run_abm"))         # Export objects to cluster
+
+clusterEvalQ(abmclust, {
+  library(LEMMAABM)
+})
+
+abm_sims <- parLapplyLB(abmclust, 1:n.reps, run_abm)
+
+stopCluster(abmclust)
+
+sims <- rep(1:n.reps, each = (t.tot+1))
+
+abm_sims_bind <- bind_rows(abm_sims) %>% 
+  mutate(sim = sims)
+  
+
+saveRDS(abm_sims_bind, "abm_testing_runs1.rds")
+```
+
+### Validate ABM dynamics  
+ABM runs in a population an order of magnitude smaller than SF for computational efficiency, so all observed SF data divided by 10 to compare to ABM outputs  
+
+```{r plot_abm_sims_Ih}
+abm_sims_bind1 <- readRDS("abm_testing_runs1.rds")
+abm_sims_sum1 <- abm_sims_bind1 %>% 
+  group_by(date) %>% 
+  summarise(S_med = median(S),
+            S_25th = quantile(S, 0.25),
+            S_75th = quantile(S, 0.75),
+            E_med = median(E),
+            E_25th = quantile(E, 0.25),
+            E_75th = quantile(E, 0.75),
+            Ip_med = median(Ip),
+            Ip_25th = quantile(Ip, 0.25),
+            Ip_75th = quantile(Ip, 0.75),
+            Ia_med = median(Ia),
+            Ia_25th = quantile(Ia, 0.25),
+            Ia_75th = quantile(Ia, 0.75),
+            Im_med = median(Im),
+            Im_25th = quantile(Im, 0.25),
+            Im_75th = quantile(Im, 0.75),
+            Imh_med = median(Imh),
+            Imh_25th = quantile(Imh, 0.25),
+            Imh_75th = quantile(Imh, 0.75),
+            Ih_med = median(Ih),
+            Ih_25th = quantile(Ih, 0.25),
+            Ih_75th = quantile(Ih, 0.75),
+            D_med = median(D),
+            D_25th = quantile(D, 0.25),
+            D_75th = quantile(D, 0.75),
+            R_med = median(R, na.rm = T),
+            R_25th = quantile(R, 0.25),
+            R_75th = quantile(R, 0.75),
+            pct_med = median(pct),
+            pct_25th = quantile(pct,0.25, na.rm = T),
+            pct_75th = quantile(pct, 0.75, na.rm = T)) %>% 
+  mutate(Date = as.Date(date))
+
+ggplot() +
+  theme_bw() +
+  theme(axis.title = element_text(size = 14,
+                                  face = "bold"),
+        axis.text = element_text(size = 12),
+        axis.text.x = element_text(angle = 45,
+                                   hjust = 1)) +
+  geom_col(data = sf_all,
+             aes(x = Date, y = (HOSP_CONF+ICU_CONF)/pop.red),
+           fill = "grey80", col = "black") +
+  geom_line(data = abm_sims_sum1,
+            aes(x = Date, y = Ih_med),
+            col = "red", alpha = 0.5, size = 1.2) +
+  geom_ribbon(data = abm_sims_sum1,
+              aes(x = Date, ymin = Ih_25th, ymax = Ih_75th),
+              fill = "red", alpha = 0.2) +
+  scale_x_date(date_labels = "%m/%d", 
+               date_breaks = "7 day") +
+  labs(x = "Date", y = "Hospitalizations/10",
+       title = "ABM Model runs comparison to observed data")
+
+```
+
+```{r plot_abm_sims_testing}
+ggplot() +
+  theme_bw() +
+  theme(axis.title = element_text(size = 14,
+                                  face = "bold"),
+        axis.text = element_text(size = 12),
+        axis.text.x = element_text(angle = 45,
+                                   hjust = 1)) +
+  geom_col(data = sf_all,
+             aes(x = Date, y = pct),
+           fill = "grey80", col = "black") +
+  geom_line(data = abm_sims_sum1,
+            aes(x = Date, y = pct_med),
+            col = "blue", alpha = 0.5 , size = 1.2) +
+  geom_ribbon(data = abm_sims_sum1,
+              aes(x = Date, ymin = pct_25th, ymax = pct_75th),
+              fill = "blue", alpha = 0.2) +
+  scale_x_date(date_labels = "%m/%d", 
+               date_breaks = "7 day") +
+  labs(x = "Date", y = "% + Tests",
+       title = "ABM Testing compared to observed")
+
+```
+
+```{r plot_abm_sims_infections}
+abm_sims_Isum1 <- abm_sims_bind1 %>% 
+  mutate(I_symp = Im + Imh + Ih,
+         I_tot = Ip + Ia + Im + Imh + Ih) %>% 
+  group_by(date) %>% 
+  summarise(I_symp_med = median(I_symp),
+            I_symp_25th = quantile(I_symp, 0.25),
+            I_symp_75th = quantile(I_symp, 0.75),
+            I_tot_med = median(I_tot),
+            I_tot_25th = quantile(I_tot, 0.25),
+            I_tot_75th = quantile(I_tot, 0.75),
+            pct_med = median(pct),
+            pct_25th = quantile(pct,0.25, na.rm = T),
+            pct_75th = quantile(pct, 0.75, na.rm = T)) %>% 
+  mutate(Date = as.Date(date))
+
+abm_sims_Isum1 %>% 
+ggplot() +
+  theme_bw() +
+  theme(axis.title = element_text(size = 14,
+                                  face = "bold"),
+        axis.text = element_text(size = 12),
+        axis.text.x = element_text(angle = 45,
+                                   hjust = 1)) +
+  geom_line(aes(x = Date, y = I_symp_med),
+            col = "darkred", alpha = 0.7, size = 1.2) +
+  geom_ribbon(aes(x = Date, ymin = I_symp_25th, ymax = I_symp_75th),
+              fill = "darkred", alpha = 0.35) +
+  geom_line(aes(x = Date, y = I_tot_med),
+            col = "orange", alpha = 0.7, size = 1.2) +
+  geom_ribbon(aes(x = Date, ymin = I_tot_25th, ymax = I_tot_75th),
+              fill = "orange", alpha = 0.35) +
+  scale_x_date(date_labels = "%m/%d", 
+               date_breaks = "7 day") +
+  labs(title = "Total and symptomatic infections through time",
+       y = "Infections")
+
+```
+

@@ -4,7 +4,7 @@
 \alias{t_latent}
 \title{latent period}
 \usage{
-t_latent(shape.l = 9, scale.l = 1.5)
+t_latent(shape.l = 5, scale.l = 1)
 }
 \arguments{
 \item{shape.l}{Shape of gamma distribution}

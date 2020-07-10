@@ -4,8 +4,16 @@
 \alias{covid_abm}
 \title{COVID ABM}
 \usage{
-covid_abm(t.tot, dt, pop.ages, q.probs, n.probs, inf.mat, transition.mat,
-  net.mat)
+covid_abm(
+  t.tot,
+  dt,
+  pop.ages,
+  q.probs,
+  n.probs,
+  inf.mat,
+  transition.mat,
+  net.mat
+)
 }
 \arguments{
 \item{t.tot}{total time to run simulation}

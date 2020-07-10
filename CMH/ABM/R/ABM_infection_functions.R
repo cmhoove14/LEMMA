@@ -9,7 +9,7 @@
 #' @export
 #'        
 
-t_latent <- function(shape.l=9, scale.l=1.5){
+t_latent <- function(shape.l=5, scale.l=1){
   rgamma(1, shape.l, scale.l)
 } 
       
@@ -139,6 +139,34 @@ p_mort <- function(age) {dplyr::case_when(age %in% c(0:9) ~ 0.01,
                                           age %in% c(70:79) ~ 0.3,
                                           age >= 80 ~ 0.45)}
 
+#' @title Time til Next state
+#' 
+#' @description Take input infection state the time spent in that state  
+#' 
+#' @param pre.status Infection status that has expired 
+#' 
+#' @return vector time to be spent in infection state. Time should be converted to `numeric` for subsequent use
+#' @export
+
+t_til_nxt <- function(pre.status){
+    if(pre.status == "E"){
+      t_latent()
+    } else if(pre.status == "Ip"){
+      t_presymp()
+    } else if(pre.status == "Ia"){
+      t_asymp()
+    } else if(pre.status == "Im"){
+      t_msymp()
+    } else if(pre.status == "Imh"){
+      t_mtosev()
+    } else if(pre.status == "Ih"){
+      t_sevsymp()
+    } else {
+      NA
+    }
+  }  
+
+
 #' @title Next State
 #' 
 #' @description Take input infection state and age and return the next infection state and the time spent in that state  
@@ -146,48 +174,76 @@ p_mort <- function(age) {dplyr::case_when(age %in% c(0:9) ~ 0.01,
 #' @param pre.status Infection status that has expired 
 #' @param age age of individual for probability of moving to different states
 #' 
-#' @return vector with two entries, the first is the next state, the second is the time to be spent in that state. Time should be converted to `numeric` for subsequent use
+#' @return vector the next state
 #' @export
 
 next_state <- function(pre.status, age){
   if (pre.status == "E"){
     post.status <- "Ip"
-    next.time <- t_presymp()
   } else if (pre.status == "Ip"){
     symp <- rbinom(1, 1, p_symp(age = age))
     if(symp == 0){
       post.status <- "Ia"
-      next.time <- t_asymp()
     } else {
       sevsymp <- rbinom(1, 1, p_sevsymp(age = age))
       if(sevsymp == 1){
         post.status <- "Imh"
-        next.time <- t_mtosev()
       } else {
         post.status <- "Im"
-        next.time <- t_msymp()
       }
     }
   } else if (pre.status == "Imh"){
     post.status <- "Ih"
-    next.time <- t_sevsymp()
   } else if (pre.status == "Ih"){
     died <- rbinom(1, 1, p_mort(age = age))
     if(died == 1){
       post.status <- "D"
-      next.time <- NA_real_
     } else {
       post.status <- "R"
-      next.time <- NA_real_
     }
-  } else if (pre.status == "Im"){
+  } else if (pre.status %in% c("Im", "Ia")){
     post.status <- "R"
-    next.time <- NA_real_
-  } else if (pre.status == "Ia"){
-    post.status <- "R"
-    next.time <- NA_real_
   }  
-  return(c(post.status, next.time))
+  return(post.status)
+}
+
+#' @title Person's FOI
+#'  
+#' @description Determine FOI from location
+#' 
+#' @param location  Location of this person
+#' @param n_transmitting number f infectious people transmitting
+#' @param res_size population of this person's residence
+#' @param work_size population of this person's workplace
+#' @param school_size population of this person's school
+#' @param comm_size population of this person's community
+#'  
+#' @return FOI for this person
+#' @export
+#'        
+# TODO: Inform this with age-stratified contact matrices
+get_foi <- function(location, n_transmitting, res_size, work_size, school_size, comm_size, trans_rate){
+  l_type <- substring(location, 1, 1)
+  l_pop <- ifelse(l_type == "0", comm_size, 
+                  ifelse(l_type == "1", res_size, 
+                         ifelse(l_type == "4", school_size, work_size)))
+  FOI <- (n_transmitting/l_pop)*trans_rate
+  
+  return(unname(FOI))
+}
+
+#' @title Simulate Infection
+#'  
+#' @description Randomly determine if infection occurs from FOI
+#' 
+#' @param foi  Person's FOI
+#'  
+#' @return binary of infection occurring or not
+#' @export
+#'        
+
+foi_infect <- function(foi){
+  as.numeric(dqrunif(1,0,1)<(1-exp(-foi)))
 }
 
 #' @title Generate Infections

@@ -12,7 +12,7 @@ next_state(pre.status, age)
 \item{age}{age of individual for probability of moving to different states}
 }
 \value{
-vector with two entries, the first is the next state, the second is the time to be spent in that state. Time should be converted to `numeric` for subsequent use
+vector the next state
 }
 \description{
 Take input infection state and age and return the next infection state and the time spent in that state
