@@ -12,6 +12,10 @@ require(matrixStats)
 require(lubridate)
 
 rm(list=ls());gc()
+
+# Adaptively set root directory to LEMMA
+setwd(gsub("LEMMA.*", "LEMMA", normalizePath(getwd())))
+
 devtools::load_all("CMH/ABM/")
 
 # ---------------------------------------------------------
@@ -136,7 +140,11 @@ tests_pars <- fitdist(tail(sf_test$tests, 30), "nbinom", "mme")$estimate
   
 # Get test data through time
   test_reports <- list()
-  
+
+# Keep detailed infection status through time
+  infection_reports <- list()
+   
+   
 # Update characteristics of initial infections  
   agents[state %!in% c("S", "D", "R"), tnext:=lapply(state, LEMMAABM::t_til_nxt)]
   agents[state %!in% c("S", "D", "R"), nextstate:=mapply(LEMMAABM::next_state, state, age)]
@@ -242,10 +250,11 @@ for(t in 2:(t.tot/dt)){
     
 # Reset infection columns
     agents[, c("n_transmitting", "FOI", "infect"):=NA_real_]
+# Store detailed infection info
+    infection_reports[[t-1]] <- agents[state %!in% c("S", "D", "R")]
     print("New infections generated")
   }
   
-
   state_time <- paste0("state",t)
     inf.dt[, (state_time):=agents[,state]]
   # On to the next one  
@@ -256,4 +265,5 @@ run.end <- Sys.time()
 run.end-run.start
 
 saveRDS(rbindlist(test_reports), paste0("CMH/ABM/Analysis/Outputs/simulated_testing", Sys.Date(),".rds"))
+saveRDS(rbindlist(infection_reports), paste0("CMH/ABM/Analysis/Outputs/simulated infections", Sys.Date(),".rds"))
 saveRDS(inf.dt, paste0("CMH/ABM/Analysis/Outputs/population_infection", Sys.Date(), ".rds"))
