@@ -27,7 +27,7 @@ agents <- readRDS("CMH/ABM/data/sf_synthetic_agents_dt.rds")
 # remove children who are mostly irrelevant to dynamics (very young and will almost exclusively be with parents)
 
 # Subset for development for faster runs/lower memory
-agents <- agents[agents$residence %in% sample(agents$residence, 2e4, replace = F)]  
+#agents <- agents[agents$residence %in% sample(agents$residence, 2e4, replace = F)]  
   
 N <- nrow(agents)  
 
@@ -254,3 +254,6 @@ for(t in 2:(t.tot/dt)){
 run.end <- Sys.time()
 
 run.end-run.start
+
+saveRDS(rbindlist(test_reports), paste0("CMH/ABM/Analysis/Outputs/simulated_testing", Sys.Date(),".rds"))
+saveRDS(inf.dt, paste0("CMH/ABM/Analysis/Outputs/population_infection", Sys.Date(), ".rds"))
