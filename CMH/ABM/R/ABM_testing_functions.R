@@ -22,7 +22,7 @@ test_prob <- function(inf.status, income_bracket, age, res_type, res_inf, last_t
     inf.weight = 50 # hospitalized 50 times more likely for testing
   }
   
-# Households with higher incomes, white race more likely to be tested
+# Households with higher incomes
 # Nursing homes and prisons more likely to be tested  
   if(res_type == "H"){
     res.weight = 1
@@ -40,7 +40,7 @@ test_prob <- function(inf.status, income_bracket, age, res_type, res_inf, last_t
 # Individuals with known infection in household more likely to be tested  
   hh.inf.weight = res_inf*10
 # Individuals without a recent test more likely to be tested  
-  last.test.weight = last_test/14
+  last.test.weight = last_test/28
   
   samp_weight_rate <- inf.weight+res.weight+income.weight+age.weight+hh.inf.weight+last.test.weight
   

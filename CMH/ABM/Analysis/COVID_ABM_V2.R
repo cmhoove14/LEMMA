@@ -4,12 +4,12 @@
 #   July 2020
 # ---------------------------------------------------------
 
+require(tidyverse)
 require(data.table)
 require(wrswoR)
 require(fitdistrplus)
 require(matrixStats)
 require(lubridate)
-require(tidyverse)
 
 rm(list=ls());gc()
 devtools::load_all("CMH/ABM/")
@@ -27,7 +27,7 @@ agents <- readRDS("CMH/ABM/data/sf_synthetic_agents_dt.rds")
 # remove children who are mostly irrelevant to dynamics (very young and will almost exclusively be with parents)
 
 # Subset for development for faster runs/lower memory
-#agents <- agents[agents$residence %in% sample(agents$residence, 2e4, replace = F)]  
+agents <- agents[agents$residence %in% sample(agents$residence, 2e4, replace = F)]  
   
 N <- nrow(agents)  
 
@@ -151,7 +151,7 @@ tests_pars <- fitdist(tail(sf_test$tests, 30), "nbinom", "mme")$estimate
 # Run the abm
 # ---------------------------------------------------------
 
-t.start <- Sys.time()
+run.start <- Sys.time()
 for(t in 2:(t.tot/dt)){
  print(t)
 # Time step characteristics
@@ -167,8 +167,8 @@ for(t in 2:(t.tot/dt)){
   
 # Advance expired states to next state, determine new nextstate and time til next state
   agents[tnext < 0, state:=nextstate]
-  agents[tnext < 0 & state %!in% c("D", "R"), nextstate:=mapply(LEMMAABM::next_state, state, age)]
-  agents[tnext < 0 & state %!in% c("D", "R"), tnext:=lapply(state, LEMMAABM::t_til_nxt)]
+  agents[tnext < 0 & state %!in% c("S", "D", "R"), nextstate:=mapply(LEMMAABM::next_state, state, age)]
+  agents[tnext < 0 & state %!in% c("S", "D", "R"), tnext:=lapply(state, LEMMAABM::t_til_nxt)]
 
   print("Infections advanced")
 # Implement testing (only during day time)---------------
@@ -181,13 +181,13 @@ for(t in 2:(t.tot/dt)){
       agents[tested == 0 & state!= "D", test_prob:=mapply(LEMMAABM::test_prob, 
                                                           state, income_bracket, age, residence_type, res_inf, t_since_test)]
   # Tested agents
-    testeds <- wrswoR::sample_int_crank(nrow(agents[tested == 0]),
-                                        n_tests,
-                                        agents[tested == 0, test_prob])
+      testeds <- agents[,id][wrswoR::sample_int_crank(nrow(agents[tested == 0 & state != "D"]),
+                                                      n_tests,
+                                                      agents[tested == 0, test_prob])]
   # Test results and reset time since last test for those who were tested
-    agents[testeds, t_since_test:=0]
-    agents[testeds, tested:=mapply(test_sens, state, t_infection)]
-    tested_agents <- agents[testeds,]
+    agents[id %in% testeds, tested:=mapply(test_sens, state, t_infection)]
+    agents[id %in% testeds, t_since_test:=0]
+    tested_agents <- agents[id %in% testeds,]
     test_reports[[(t-1)]] <- tested_agents[,time:=t]
     
     print("Testing conducted")
@@ -230,17 +230,18 @@ for(t in 2:(t.tot/dt)){
   print("Locations resolved")
 # Determine number of transmitting individuals by location  
   agents[, n_transmitting:=sum(state %in% c("Ip", "Ia", "Im", "Imh")), by = location]
-# Determine FOI for individuals in location where someone is transmitting
-  agents[n_transmitting > 0, FOI:=mapply(LEMMAABM::get_foi, location, n_transmitting, 
-                                         res_size, work_size, school_size, comm_size, 
-                                         MoreArgs = list(trans_rate = bta))]
+# Determine FOI for susceptible individuals in location where someone is transmitting
+  agents[n_transmitting > 0 & state == "S", FOI:=mapply(LEMMAABM::get_foi, location, n_transmitting, 
+                                                        res_size, work_size, school_size, comm_size, 
+                                                        MoreArgs = list(trans_rate = bta))]
 # Generate infections, update their state, sample for their nextstate and time until reaching it
-
-    agents[n_transmitting > 0, infect:=sapply(FOI, LEMMAABM::foi_infect)]
+    agents[n_transmitting > 0 & state == "S", infect:=sapply(FOI, LEMMAABM::foi_infect)]
     agents[infect == 1, state:="E"]
     agents[infect == 1, nextstate:=mapply(LEMMAABM::next_state, state, age)]
     agents[infect == 1, tnext:=lapply(state, LEMMAABM::t_til_nxt)]
     
+# Reset infection columns
+    agents[, c("n_transmitting", "FOI", "infect"):=NA_real_]
     print("New infections generated")
   }
   
@@ -250,6 +251,6 @@ for(t in 2:(t.tot/dt)){
   # On to the next one  
     
 }  
-t.end <- Sys.time()
+run.end <- Sys.time()
 
-t.end-t.start
+run.end-run.start
