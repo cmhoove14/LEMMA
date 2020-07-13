@@ -8,4 +8,4 @@
 #$ -m beas
 # 
  
-mpirun -n 1 R --vanilla < CVID_ABM_V2.R > Outputs/ABM_V2_Run.Rout
+mpirun -n 1 R --vanilla < COVID_ABM_V2.R > Outputs/ABM_V2_Run.Rout
