@@ -19,10 +19,11 @@ sf.gq.ppl <- read.csv("CMH/Data/SF_synthetic_pop/FRED_SF_groupQuartersPeople.csv
 gc()
 sf.sf <- tigris::tracts("06",
                         "075",
+                        year = 2010,
                         class = "sf")
 
 sf.sf <- sf.sf %>% 
-  filter(AWATER < 5e7)
+  filter(AWATER10 < 5e7)
 
 #Save crs to match coordinates
 sf.crs <- st_crs(sf.sf)
@@ -43,7 +44,7 @@ saveRDS(sf.wmat.df, "CMH/ABM/data/sf_ct_distance_matrix.rds")
 # Visualize 
 num_nbs <- length(sf.nbs)
 threshold <- 0.1
-plot(sf.sp)
+sp::plot(sf.sp)
 points(sf.coords, pch = 16, cex = 0.5)
 
 adj_matrix <- sf.wmat>threshold
@@ -62,6 +63,26 @@ sf.work.sf <- sf.work %>%
   st_set_crs(sf.crs) %>% 
   st_join(., sf.sf)
 
+sp::plot(sf.sp)
+  points(as(sf.work.sf, "Spatial"), pch = 17, cex = 0.4, col = "orange")
+
+#----------------------------------------
+# Determine CTs of group quarters
+#----------------------------------------
+sf.gq.sf <- sf.gq %>% 
+  st_as_sf(., coords = c("longitude", "latitude")) %>% 
+  st_set_crs(sf.crs) %>% 
+  st_join(., sf.sf)
+
+sp::plot(sf.sp)
+  points(as(sf.gq.sf, "Spatial"), pch = 18, cex = 0.7, col = "darkred")
+
+#----------------------------------------
+# Distance matrix between workplaces and group quarters in order to assign some workers to working at group quarters
+#----------------------------------------
+work_gq_dist_mat <- st_distance(sf.work.sf, sf.gq.sf)
+class(work_gq_dist_mat) <- "numeric"
+  
 #----------------------------------------
 # Merge datasets
 #----------------------------------------

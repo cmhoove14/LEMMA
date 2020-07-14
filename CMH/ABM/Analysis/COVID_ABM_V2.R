@@ -191,7 +191,7 @@ for(t in 2:(t.tot/dt)){
   # Tested agents
       testeds <- agents[,id][wrswoR::sample_int_crank(nrow(agents[tested == 0 & state != "D"]),
                                                       n_tests,
-                                                      agents[tested == 0, test_prob])]
+                                                      agents[tested == 0 & state != "D", test_prob])]
   # Test results and reset time since last test for those who were tested
     agents[id %in% testeds, tested:=mapply(test_sens, state, t_infection)]
     agents[id %in% testeds, t_since_test:=0]
