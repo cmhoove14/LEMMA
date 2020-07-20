@@ -1,3 +1,23 @@
+#' @title Community location
+#'  
+#' @description Function to randomly determine location if agent is not at work, home, or school. 10% chance of visiting neighboring community, 1% chance of visiting some random community. Requires `sf.wmat` in environment in order to determine neighboring and random communities to potential visit
+#' 
+#' @param comm community (neighborhood) of residence
+comm_loc <- function(comm){
+  loc <- wrswoR::sample_int_crank(3,1,c(0.89,0.1,0.01))
+  
+  if(loc == 1){
+    return(comm)
+  } else if(loc == 2){
+    nbrs <- which(sf.wmat[comm,] !=0)
+    return(nbrs[dqrng::dqsample.int(length(nbrs),1)])
+  } else{
+    return(dqrng::dqsample.int(nrow(sf.wmat),1))
+  } 
+         
+}
+
+
 #' @title Simulate school-aged children who are also workers' location
 #'  
 #' @description Simulate location of school-aged children depending on agent characteristics, NPIs, and time of day
@@ -8,8 +28,8 @@
 #' @param SiP shelter in place active? 1/0
 #' @param time_day time of day (night or day)
 #' @param day_week day of the week (U, M, T, W, R, F, or S)
+#' @param sociality relative sociality of agent
 #' @param comm_bracket income bracket of the community (census tract)
-#' @param essential is an essential worker?
 #' @param res_id id of this individual's residence
 #' @param scl_id id of this individual's school
 #' @param work_id id of this individual's school
@@ -20,43 +40,29 @@
 #'        
 sac_worker_location <- function(inf.state, tested,
                                 scl, SiP, time_day, day_week,
-                                comm_bracket, essential, 
+                                sociality, comm_bracket, 
                                 res_id, scl_id, work_id, comm_id){
-# Children workers who are sick or tested positive stay home 
-  if(inf.state %in% c("Im", "Imh") | tested == 1){
+# Children who are sick or tested positive stay home; children always at home at night and in the mornings  
+  if(inf.state %in% c("Im", "Imh") | tested == 1 | time_day %in% c("N", "M")){
     location = res_id
+  } else if(SiP == 1){
+  # Probability of following SiP function of sociality and income quartile 
+    sip.flw <- as.numeric(dqrunif(1,0,1) > sociality/comm_bracket)
+    location = ifelse(sip.flw == 1, res_id, comm_id)
 # Children workers are in school during the day if it's open and it's a weekday    
   } else if(scl == 0 & time_day == "D" & day_week %in% c("M", "T", "W", "R", "F")){
     location = scl_id
-# Children workers are randomly either still at school, in the community, at work or at home in the evening during the week if schools are open  
+# Children workers are randomly either still at school, in the community, at work or at home in the evenings and mornings during the week if schools are open  
   } else if(scl == 0 & time_day %in% c("E", "M") & day_week %in% c("M", "T", "W", "R", "F")){
     location = c(scl_id, comm_id, res_id, work_id)[dqsample.int(4, 1)]
-# Children workers are likely at home, maybe at work on school nights
-  } else if(scl == 0 & time_day == "N" & day_week %in% c("M", "T", "W", "R", "F")){
-    location = ifelse(dqrunif(1,0,1)>0.1, work_id, res_id)
 # Weekend-like dynamics if school is closed, but SiP not in effect or if it's the weekend: children workers can be at home, at work or in the community during the morning, day and evening
-  } else if((scl == 1 & SiP == 0 & time_day != "N") | (day_week %in% c("S", "U") & SiP == 0 & time_day != "N")){
+  } else if((scl == 1 & SiP == 0) | (day_week %in% c("S", "U") & SiP == 0)){
     location = c(comm_id, res_id, work_id)[dqsample.int(3, 1)]
-# Children workers are likely at home, maybe at work on weekend-like nights
-  } else if((scl == 1 & SiP == 0 & time_day == "N") | (day_week %in% c("S", "U") & SiP == 0 & time_day == "N")){
-    location = ifelse(dqrunif(1,0,1)>0.2, work_id, res_id)
-# Children Workers location during SiP non-nights
-  } else if(SiP == 1 & time_day != "N"){
-    # Most likely at home
-    location = c(res_id, work_id, comm_id)[wrswoR::sample_int_crank(3, 1, 
-                                                                    prob = c(10,
-                                                                             5*essential,
-                                                                             5-comm_bracket))]
-# Children Workers location during SiP nights
-  } else if(SiP == 1 & time_day == "N"){
-     # Most likely at home
-    location = c(res_id, work_id, comm_id)[wrswoR::sample_int_crank(3, 1, 
-                                                                    prob = c(10,
-                                                                             2*essential,
-                                                                             (5-comm_bracket)/2))]
   } else {
     location = NA
   }
+  # TODO: Implement variability in community location with comm_loc function above
+  # if(location == comm_id){location = comm_loc(comm_id)}
   return(location)
 }
 

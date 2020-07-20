@@ -11,8 +11,8 @@ sac_worker_location(
   SiP,
   time_day,
   day_week,
+  sociality,
   comm_bracket,
-  essential,
   res_id,
   scl_id,
   work_id,
@@ -32,9 +32,9 @@ sac_worker_location(
 
 \item{day_week}{day of the week (U, M, T, W, R, F, or S)}
 
-\item{comm_bracket}{income bracket of the community (census tract)}
+\item{sociality}{relative sociality of agent}
 
-\item{essential}{is an essential worker?}
+\item{comm_bracket}{income bracket of the community (census tract)}
 
 \item{res_id}{id of this individual's residence}
 

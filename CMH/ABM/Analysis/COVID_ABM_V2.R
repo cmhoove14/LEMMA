@@ -7,6 +7,7 @@
 require(tidyverse)
 require(data.table)
 require(wrswoR)
+require(dqrng)
 require(fitdistrplus)
 require(matrixStats)
 require(lubridate)
@@ -28,10 +29,11 @@ source("CMH/Data/Get_COVID_Cal_latest.R")
 # synthetic agents from FRED/RTI
 agents <- readRDS("CMH/ABM/data/sf_synthetic_agents_dt.rds")
 
-# remove children who are mostly irrelevant to dynamics (very young and will almost exclusively be with parents)
+#Plot tests through time
+#ggplot(data = sf_test) + geom_line(aes(x = Date, y = (tests/9e5)*1e5)) + theme_bw() +scale_x_date(date_breaks = "14 day") +theme(axis.text.x = element_text(angle = 45,hjust = 1))+labs(x="",y="SF Tests per 100k")
 
-# Subset for development for faster runs/lower memory
-#agents <- agents[agents$residence %in% sample(agents$residence, 2e4, replace = F)]  
+# UNCOMMENT BELOW/change size of sample TO Subset for development for faster runs/lower memory
+agents <- agents[agents$residence %in% sample(agents$residence, 2e4, replace = F)]  
   
 N <- nrow(agents)  
 
@@ -49,6 +51,7 @@ pcr_sens <- readRDS("CMH/ABM/data/PCR_Sens_Kucirka.rds")
   #plot(c(0:21),c(0,pcr_sens_day)) ; lines(seq(0,21,by=0.1), sapply(seq(0,21,by=0.1),pcr_sens_fun))
   
 # Contact matrices from https://doi.org/10.1371/journal.pcbi.1005697
+# Will be useful if moving to daily time step  
 home_contacts <- readxl::read_xlsx("CMH/ABM/data/contact_matrices_152_countries/MUestimates_home_1.xlsx")
   home_c_rate <- colSums(home_contacts)
 
@@ -72,7 +75,7 @@ t0 <- as.Date("2020-02-01")
 last_dat <- max(sf_all %>% na.omit() %>% pull(Date))
 today <- Sys.Date()
 
-# Beta change dates
+# Key change dates
 scl.close <- as.Date("2020-03-05")     #Schools closed
 sip.start <- as.Date("2020-03-15")     #SiP announced
 t.end <- as.Date("2020-08-01")   # Where we're headed (for future use)
@@ -90,8 +93,10 @@ day_of_week_expand[day_of_week_expand == 5] <- "R"
 day_of_week_expand[day_of_week_expand == 6] <- "F"
 day_of_week_expand[day_of_week_expand == 7] <- "S"
 
+# Break up week into 6 parts, Morning, Dayx2, Evening, Nightx2: SHOULD UPDATE IF timestep!=4/24
 time_of_day <- rep(c("M", "D", "D", "E", "N", "N"), times = t.tot)  
 
+# Binaary time series for sip and school closure active
 t.sip <- c(rep(0, as.numeric(sip.start-t0)/dt),
            rep(1, as.numeric(t.end-sip.start)/dt))
 
@@ -110,7 +115,9 @@ tests_pars <- fitdist(tail(sf_test$tests, 30), "nbinom", "mme")$estimate
                        method = "linear")
   
 # Assign essential workers
+  agents[work !="X"& substr(work,1,1)!="5", essential:=1] # Essential if working in nursing facility or prison
   agents[work!="X", essential:=sapply(income_bracket, function(i){rbinom(1,1,prob=1/(i*3))})]
+  agents[work!="X"&school!="X", essential:=0] # school-aged children workers not essential
 # aiming for 10-20% essential workers  
   nrow(agents[work!="X" & essential == 1])/nrow(agents[work!="X"])
   
@@ -144,15 +151,16 @@ tests_pars <- fitdist(tail(sf_test$tests, 30), "nbinom", "mme")$estimate
 # Keep detailed infection status through time
   infection_reports <- list()
    
-   
 # Update characteristics of initial infections  
+  # Transition time
   agents[state %!in% c("S", "D", "R"), tnext:=lapply(state, LEMMAABM::t_til_nxt)]
+  # State entering once transition time expires
   agents[state %!in% c("S", "D", "R"), nextstate:=mapply(LEMMAABM::next_state, state, age)]
+  #Time initial infections occurred
   agents[state %!in% c("S", "D", "R"), t_infection:=dt]
   agents[, t_since_test:=0]
 
-# Fill testing probabilities 
-  # Only necessary if testing is available in first time step of the model
+# Fill testing probabilities, Only necessary if testing is available in first time step of the model
   # agents[tested != 1, test_prob:=mapply(LEMMAABM::test_prob, state, income, age, race, residence_type, res_inf, t_since_test)]
   
 # ---------------------------------------------------------
@@ -205,43 +213,55 @@ for(t in 2:(t.tot/dt)){
   
     
 # Simulate infection --------------------
-  if(nrow(agents[state %!in% c("S", "E", "D", "R")])>0){
+  if(nrow(agents[state %!in% c("S", "E", "D", "R")])>0 & time_day != "N"){
 # Determine locations
+# Quarantine infections/testeds (IN DEV) 
+  # agents[state %in% c("Im", "Imh") | tested == 1, quar:=sapply(q_prob, function(q) as.numeric(dqrunif(1,0,1) > q))]
+    
+  # agents[quar == 1, location:=residence]  
+  
+# Find locations of those not quarantined, deceased, or in the hospital  
+  # Agents that are both in school and have a job
   agents[school != "X" & work != "X" & state %!in% c("Ih", "D"),
          location:=mapply(LEMMAABM::sac_worker_location,
                           state, tested,
                           scl.closed, sip.active, time_day, day_week,
-                          comm_bracket, essential, 
-                          residence, school, work, comm)]
+                          sociality, comm_bracket, 
+                          residence, school, work, nbhd)]
   
+  # Agents that are workers only
   agents[school != "X" & work == "X" & state %!in% c("Ih", "D"), 
          location:=mapply(LEMMAABM::sac_location, 
                           state, tested, scl.closed, sip.active,
                           time_day, day_week, comm_bracket, age,
-                          residence, school, comm)]
+                          residence, school, nbhd)]
   
+  # Agents that are in school
   agents[school == "X" & work != "X" & state %!in% c("Ih", "D"), 
          location:=mapply(LEMMAABM::worker_location,
                           state, tested,
                           sip.active, time_day, day_week,
                           age, res_kids, essential, 
                           comm_bracket, income_bracket, 
-                          residence, work, comm)]
+                          residence, work, nbhd)]
   
+  # Agents that are neight in school or are working
   agents[work == "X" & school == "X" & state %!in% c("Ih", "D"),
          location:=mapply(LEMMAABM::other_location, 
                           state, tested,
                           sip.active, time_day, 
                           age, residence_type, comm_bracket, 
-                          residence, comm)]
+                          residence, nbhd)]
   
   print("Locations resolved")
 # Determine number of transmitting individuals by location  
   agents[, n_transmitting:=sum(state %in% c("Ip", "Ia", "Im", "Imh")), by = location]
+  
 # Determine FOI for susceptible individuals in location where someone is transmitting
   agents[n_transmitting > 0 & state == "S", FOI:=mapply(LEMMAABM::get_foi, location, n_transmitting, 
                                                         res_size, work_size, school_size, comm_size, 
                                                         MoreArgs = list(trans_rate = bta))]
+  
 # Generate infections, update their state, sample for their nextstate and time until reaching it
     agents[n_transmitting > 0 & state == "S", infect:=sapply(FOI, LEMMAABM::foi_infect)]
     agents[infect == 1, state:="E"]
@@ -250,6 +270,7 @@ for(t in 2:(t.tot/dt)){
     
 # Reset infection columns
     agents[, c("n_transmitting", "FOI", "infect"):=NA_real_]
+    
 # Store detailed infection info
     infection_reports[[t-1]] <- agents[state %!in% c("S", "D", "R")]
     print("New infections generated")
@@ -264,6 +285,8 @@ run.end <- Sys.time()
 
 run.end-run.start
 
-saveRDS(rbindlist(test_reports), paste0("CMH/ABM/Analysis/Outputs/simulated_testing", Sys.Date(),".rds"))
-saveRDS(rbindlist(infection_reports), paste0("CMH/ABM/Analysis/Outputs/simulated infections", Sys.Date(),".rds"))
+saveRDS(rbindlist(test_reports), paste0("CMH/ABM/Analysis/Outputs/simulated_testing", Sys.Date(),".rds"),
+        fill = TRUE)
+saveRDS(rbindlist(infection_reports), paste0("CMH/ABM/Analysis/Outputs/simulated_infections", Sys.Date(),".rds"),
+        fill = TRUE)
 saveRDS(inf.dt, paste0("CMH/ABM/Analysis/Outputs/population_infection", Sys.Date(), ".rds"))
