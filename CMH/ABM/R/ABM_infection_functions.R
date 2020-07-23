@@ -23,7 +23,7 @@ t_latent <- function(shape.l=5, scale.l=1){
 #' @return numeric of time spent in presymptomatic period (Ip)
 #' @export
 #'        
-t_presymp <- function(shape.ip=2.5,scale.ip=1){
+t_presymp <- function(shape.ip=2,scale.ip=1){
   rgamma(1, shape.ip, scale.ip)
 } 
 
