@@ -328,35 +328,34 @@ other_location <- function(inf.state, tested,
   age_prob <- ifelse(age <10, 0.9, ifelse(age>10&age<16, 0.5, 0.1))
   comm_prob <- 1/(5-comm_bracket) # more likely to be in community if in lower income community (4 quartiles of income brackets)
   soc_prob <- 1-sociality # More social = less likely to be at home
-  if(SiP == 1 & res_type == "C"){
-    p.home = NA_integer_ # College dormitories irrelevant once SiP starts, assume students leave
+
+  if(SiP == 0 & time_day != "N"){
+    p.home = age_prob*comm_prob*soc_prob
     
-  } else if(SiP == 0 & res_type == "C"){
-    p.home = rep(0.333,n)
+  } else if(SiP == 0 & time_day == "N"){
+    p.home = age_prob*comm_prob*soc_prob*2
     
-  } else if(SiP == 0 & res_type == "H" & time_day != "N"){
-    p.home = 1-(age_prob*comm_prob*sociality)
+  } else if(SiP == 1 & time_day == "N"){
+    p.home = 1
     
-  } else if(SiP == 0 & res_type == "H" & time_day == "N"){
-    p.home = age_prob*comm_prob*sociality
-    
-  } else if(SiP == 1 & res_type == "H" & time_day == "N"){
-    p.home = age_prob*comm_prob*sociality
-    
-  } else if(SiP == 1 & res_type == "H" & time_day != "N"){
-    p.home = age_prob*comm_prob*sociality
+  } else if(SiP == 1 & time_day != "N"){
+    p.home = age_prob*comm_prob*soc_prob*2
     
   } else {
     stop("Situation not recognized for non-worker, non-school agent")
   }
     
-  location <- rep(NA_integer_, n)  
+  location <- comm_id  
   at.home <- inf.state %in% c("Im", "Imh") | tested == 1 | res_type %in% c("P", "N")
   location[at.home] <- res_id[at.home]
   
   l.probs <- dqrunif(n)
+  at.home2 <- l.probs < p.home
+  location[at.home2] <- res_id[at.home2]
   
-  
+  # Assume college students leave once SiP announced
+  left <- SiP == 1 & res_type == "C"
+  location[left] <- NA_integer_
   
   return(location)
 }
