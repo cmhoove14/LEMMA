@@ -4,10 +4,13 @@
 \alias{comm_loc}
 \title{Community location}
 \usage{
-comm_loc(comm)
+comm_loc(comm, nbhd_mat)
 }
 \arguments{
 \item{comm}{community (neighborhood) of residence}
+}
+\value{
+location of agent if they choose to be in the community
 }
 \description{
 Function to randomly determine location if agent is not at work, home, or school. 10% chance of visiting neighboring community, 1% chance of visiting some random community. Requires `sf.wmat` in environment in order to determine neighboring and random communities to potential visit

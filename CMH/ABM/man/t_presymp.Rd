@@ -4,7 +4,7 @@
 \alias{t_presymp}
 \title{Presymptomatic period}
 \usage{
-t_presymp(shape.ip = 1, scale.ip = 2)
+t_presymp(shape.ip = 2, scale.ip = 1)
 }
 \arguments{
 \item{shape}{Shape of gamma distribution}

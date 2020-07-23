@@ -4,7 +4,7 @@
 \alias{t_msymp}
 \title{Mild infection duration}
 \usage{
-t_msymp(exp.im = 1/9)
+t_msymp(exp.im = 1/6)
 }
 \arguments{
 \item{exp.im}{parameter of exponential distribution for time spent with mild symptoms}

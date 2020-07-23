@@ -13,6 +13,7 @@ worker_location(
   age,
   kids,
   essential,
+  sociality,
   comm_bracket,
   income_bracket,
   res_id,
@@ -36,6 +37,8 @@ worker_location(
 \item{kids}{number of kids in household}
 
 \item{essential}{is the individual in an essential workforce? 1/0}
+
+\item{sociality}{agent sociality}
 
 \item{comm_bracket}{income bracket of the community (census tract)}
 

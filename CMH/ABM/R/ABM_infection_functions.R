@@ -242,12 +242,16 @@ next_state <- function(pre.status, age){
 # TODO: Inform this with age-stratified contact matrices
 get_foi <- function(location, n_transmitting, res_size, work_size, school_size, comm_size, trans_rate){
   l_type <- substring(location, 1, 1)
-  l_pop <- ifelse(l_type == "0", comm_size, 
-                  ifelse(l_type == "1", res_size, 
-                         ifelse(l_type == "4", school_size, work_size)))
+  l_lngth <- nchar(location)
+  
+  l_pop <- comm_size
+  l_pop[l_type=="1" & l_lngth > 5] <- res_size[l_type=="1" & l_lngth > 5]
+  l_pop[l_type=="4" & l_lngth > 5] <- school_size[l_type=="4" & l_lngth > 5]
+  l_pop[l_type=="5" & l_lngth > 5] <- school_size[l_type=="5" & l_lngth > 5]
+  
   FOI <- (n_transmitting/l_pop)*trans_rate
   
-  return(unname(FOI))
+  return(FOI)
 }
 
 #' @title Simulate Infection
@@ -261,7 +265,8 @@ get_foi <- function(location, n_transmitting, res_size, work_size, school_size, 
 #'        
 
 foi_infect <- function(foi){
-  as.numeric(dqrunif(length(foi),0,1)<(1-exp(-foi)))
+  p <- dqrunif(length(foi))
+  return(as.numeric(p<(1-exp(-foi))))
 }
 
 #' @title Generate Infections

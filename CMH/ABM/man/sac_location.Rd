@@ -13,6 +13,7 @@ sac_location(
   day_week,
   comm_bracket,
   age,
+  sociality,
   res_id,
   scl_id,
   comm_id
@@ -34,6 +35,8 @@ sac_location(
 \item{comm_bracket}{income bracket of the community (census tract)}
 
 \item{age}{age of person}
+
+\item{sociality}{agent sociality}
 
 \item{res_id}{id of this individual's residence}
 

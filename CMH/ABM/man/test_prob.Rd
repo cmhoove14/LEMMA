@@ -4,18 +4,18 @@
 \alias{test_prob}
 \title{Testing probability}
 \usage{
-test_prob(inf.status, income_bracket, age, res_type, res_inf, last_test)
+test_prob(inf.status, age, res_type, res_inf)
 }
 \arguments{
 \item{inf.status}{Infection status}
-
-\item{income_bracket}{income}
 
 \item{age}{age}
 
 \item{res_type}{type of residence}
 
 \item{res_inf}{residence infection status}
+
+\item{income_bracket}{income}
 
 \item{last_test}{time since person was last tested}
 }
