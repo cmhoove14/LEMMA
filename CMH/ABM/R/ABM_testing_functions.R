@@ -13,38 +13,28 @@
 #' @export
 #'        
 
-test_prob <- function(inf.status, income_bracket, age, res_type, res_inf, last_test){
-  if(inf.status %in% c("S", "E", "Ip", "Ia", "R")){
-    inf.weight = 1  # no symptoms base weight
-  } else if(inf.status %in% c("Im", "Imh")){
-    inf.weight = 10 # symptoms 10 times more likely for testing
-  } else {
-    inf.weight = 50 # hospitalized 50 times more likely for testing
-  }
-  
-# Households with higher incomes
+test_prob <- function(inf.status, age, res_type, res_inf){
+  n <- length(inf.status)
+
+# Weights based on infection status    
+  inf.weight <- rep(1, n) 
+  inf.weight[inf.status == "Ih"] <- 50 # hospitalized 50 times more likely for testing
+  inf.weight[inf.status %in% c("Im", "Imh")] <- 10 # symptoms 10 times more likely for testing
+
+# Weights based on residence type
+#TODO: Update this if simulating e.g. weekly testing of everyone in these facilities  
 # Nursing homes and prisons more likely to be tested  
-  if(res_type == "H"){
-    res.weight = 1
-    income.weight = income_bracket
-  } else if(res_type == "C"){
-    res.weight = 1
-    income.weight = 1
-  } else {
-    res.weight = 10
-    income.weight = 1
-  }
+  res.weight <- rep(1, n)
+  res.weight[res_type %in% c("N", "P")] <- 10
   
 # Older age groups more likely to be tested  
   age.weight = age/10
 # Individuals with known infection in household more likely to be tested  
   hh.inf.weight = res_inf*10
-# Individuals without a recent test more likely to be tested  
-  last.test.weight = last_test/28
+
+  samp_weight_rate <- inf.weight+res.weight+age.weight+hh.inf.weight
   
-  samp_weight_rate <- inf.weight+res.weight+income.weight+age.weight+hh.inf.weight+last.test.weight
-  
-  return(rpois(1, samp_weight_rate))
+  return(rpois(n, samp_weight_rate))
 }
 
 #' @title False Negative Rate
@@ -59,8 +49,14 @@ test_prob <- function(inf.status, income_bracket, age, res_type, res_inf, last_t
 #'        
 
 test_sens <- function(inf.status, t.since.infection){
-  ifelse(inf.status %in% c("S", "D", "R"),
-         0, rbinom(1,1,pcr_sens_fun(t.since.infection)))
+  n <- length(inf.status)
+  p_test <- dqrunif(n)
+  p_sens <- pcr_sens_fun(t.since.infection)
+  
+  test_result <- rep(0, n)
+  test_result[p_test < p_sens & inf.status %!in% c("S", "D", "R")] <- 1
+  
+  return(test_result)
 }
 
 #' @title Quarantine probability
