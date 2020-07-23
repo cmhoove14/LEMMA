@@ -1,22 +1,52 @@
+#' @title Sample location
+#'  
+#' @description Function to determine agent's location given present model conditions. Works for agents with 3 possible locations residence/home, community and either work or school. Function passes location ids plus probability of home and community, with probability work/ school then implied
+#' 
+#' @param l_res residence location id
+#' @param l_com community location id
+#' @param l_scl work/school location id
+#' @param p_res probability of being at residence
+#' @param p_com probability of being in community
+#' 
+#' @return vector of location ids
+#' @export
+#' 
+scl_loc <- function(l_res, l_com, l_scl, p_res, p_com){
+  n <- length(l_res)
+  #print(n)
+  u <- runif(n)
+  samp <- l_com
+  index <- u < p_res
+  samp[index] <- l_res[index]
+  index <- u > (p_res + p_com)
+  samp[index] <- l_scl[index]
+  return(samp)
+  
+}
+
 #' @title Community location
 #'  
 #' @description Function to randomly determine location if agent is not at work, home, or school. 10% chance of visiting neighboring community, 1% chance of visiting some random community. Requires `sf.wmat` in environment in order to determine neighboring and random communities to potential visit
 #' 
 #' @param comm community (neighborhood) of residence
-comm_loc <- function(comm){
-  loc <- wrswoR::sample_int_crank(3,1,c(0.89,0.1,0.01))
+#' 
+#' @return location of agent if they choose to be in the community
+#' @export
+#' 
+
+comm_loc <- function(comm, nbhd_mat){
+  nobs <- length(comm)
+  nbrs <- 
+  cp <- dqrunif(nobs)
   
-  if(loc == 1){
-    return(comm)
-  } else if(loc == 2){
-    nbrs <- which(sf.wmat[comm,] !=0)
-    return(nbrs[dqrng::dqsample.int(length(nbrs),1)])
-  } else{
-    return(dqrng::dqsample.int(nrow(sf.wmat),1))
-  } 
+# Determine if agent is in own neighborhood, neighboring neighborhood, or randomly chosen neighborhood with probabilities 89%, 10%, 1% respectively  
+  out <- comm
+  out[cp > 0.89 & cp < 0.99] <- nbhd_mat[comm]
+  out[cp > 0.99] <- dqrng::dqsample.int(nrow(nbhd_mat),1)
+
+  return(out)
          
 }
-
 
 #' @title Simulate school-aged children who are also workers' location
 #'  
@@ -78,6 +108,7 @@ sac_worker_location <- function(inf.state, tested,
 #' @param day_week day of the week (U, M, T, W, R, F, or S)
 #' @param comm_bracket income bracket of the community (census tract)
 #' @param age age of person
+#' @param sociality agent sociality
 #' @param res_id id of this individual's residence
 #' @param scl_id id of this individual's school
 #' @param comm_id id of this individual's community
@@ -87,28 +118,45 @@ sac_worker_location <- function(inf.state, tested,
 #'        
 sac_location <- function(inf.state, tested,
                          scl, SiP, time_day, day_week,
-                         comm_bracket, age, 
+                         comm_bracket, age, sociality,
                          res_id, scl_id, comm_id){
-# Children who are sick or tested positive stay home; children always at home at night and in the mornings  
-  if(inf.state %in% c("Im", "Imh") | tested == 1 | time_day %in% c("N", "M")){
-    location = res_id
+  
+  n <- length(inf.state)
+  
+# Children always at home at night and in the mornings  
+  if(time_day %in% c("N", "M")){
+    probs <- cbind(rep(1,n), rep(0,n))
+    
 # Children are in school during the day if it's open and it's a weekday    
   } else if(scl == 0 & time_day == "D" & day_week %in% c("M", "T", "W", "R", "F")){
-    location = scl_id
+    probs <- cbind(rep(0,n), rep(0,n))
+    
 # Children are randomly either still at school, in the community or at home in the evening during the week if schools are open  
   } else if(scl == 0 & time_day == "E" & day_week %in% c("M", "T", "W", "R", "F")){
-    location = c(scl_id, comm_id, res_id)[dqsample.int(3, 1)]
+    probs <- cbind(rep(0.33333,n), rep(0.33333,n))
+    
 # Weekend-like dynamics if school is closed, but SiP not in effect or if it's the weekend: children can be at home or in the community during the day and evening
   } else if((scl == 1 & SiP == 0) | (day_week %in% c("S", "U") & SiP == 0)){
-    location = c(comm_id, res_id)[dqsample.int(2, 1)]
+    probs <- cbind(rep(0.5,n), rep(0.5,n))
+    
 # Shelter in place, sac most likely at home, but age and community dependent chance of being in community    
   } else if(SiP == 1){
     age_prob <- 1/(20-age) # More likely to be in community if older
-    comm_prob <- 1/comm_bracket # more likely to be in community if in lower income community (4 quartiles of income brackets)
-    location = ifelse(dqrunif(1,0,1)>(age_prob*comm_prob), comm_id, res_id)
+    inc_prob <- 1/comm_bracket # more likely to be in community if in lower income community (4 quartiles of income brackets)
+    comm_prob <- age_prob*inc_prob*sociality
+    
+    probs <- cbind(1-comm_prob, comm_prob)
+    
   } else {
-    location = NA
+    stop("Situation not recognized for School agent")
   }
+  
+  # School agents who are sick or tested positive stay home
+  at.home <- inf.state %in% c("Im", "Imh") | tested == 1
+  location <- rep(NA_integer_, n)
+  location[at.home] <- res_id[at.home]
+  location[!at.home] <- scl_loc(res_id[!at.home],comm_id[!at.home], scl_id[!at.home],  probs[!at.home, 1], probs[!at.home, 2])
+
   return(location)
 }
 
@@ -124,6 +172,7 @@ sac_location <- function(inf.state, tested,
 #' @param age age of person
 #' @param kids number of kids in household
 #' @param essential is the individual in an essential workforce? 1/0
+#' @param sociality agent sociality
 #' @param comm_bracket income bracket of the community (census tract)
 #' @param income_bracket income bracket of the community (census tract)
 #' @param res_id id of this individual's residence
@@ -135,132 +184,97 @@ sac_location <- function(inf.state, tested,
 #'        
 worker_location <- function(inf.state, tested,
                             SiP, time_day, day_week,
-                            age, kids, essential, 
+                            age, kids, essential, sociality,
                             comm_bracket, income_bracket, 
                             res_id, work_id, comm_id){
-# Workers who are sick or tested positive stay home
-  if(inf.state %in% c("Im", "Imh") | tested == 1){
-    location = res_id
-# Workers location (community, home, or work) during the week in the morning/evening
-  } else if(SiP == 0 & time_day %in% c("M", "E") & day_week %in% c("M", "T", "W", "R", "F")){
+  
+    n <- length(inf.state)
+
     # all these things roughly normalized to 4 to input into sampling weights
     age_prob <- age/20 # Older more likely to be at home
     kids_prob <- ifelse(kids>0, 4, 1) # Have kids more likely to be at home
     comm_prob <- 5-comm_bracket # lower income brackets, higher values
     income_prob <- 5-income_bracket # lower income brackets, higher values
+  
+# Workers location (community, home, or work) during the week in the morning/evening
+  if(SiP == 0 & time_day %in% c("M", "E") & day_week %in% c("M", "T", "W", "R", "F")){
     
-  # Higher probability of at home if older and/or with kids. Higher probability of at work if lower income job, higher probability of in community if lower income community  
-    location = c(res_id, work_id, comm_id)[wrswoR::sample_int_crank(3, 1, 
-                                                                    prob = c(age_prob+kids_prob,
-                                                                             income_prob,
-                                                                             comm_bracket))]
+    probs = cbind(age_prob+kids_prob,
+                  income_prob,
+                  comm_bracket*sociality)
+    
 # Workers location (community, home, or work) during the week during the day
   } else if(SiP == 0 & time_day == "D" & day_week %in% c("M", "T", "W", "R", "F")){
-    # all these things roughly normalized to 4 to input into sampling weights
-    age_prob <- age/20 # Older more likely to be at home
-    kids_prob <- ifelse(kids>0, 4, 1) # Have kids more likely to be at home
-    comm_prob <- 5-comm_bracket # lower income brackets, higher values
-    income_prob <- 5-income_bracket # lower income brackets, higher values
     
-  # Switch work and income probabilities  
-    location = c(res_id, work_id, comm_id)[wrswoR::sample_int_crank(3, 1, 
-                                                                    prob = c(income_prob,
-                                                                             kids_prob+age_prob,
-                                                                             comm_bracket))]
+    probs = cbind(income_prob,
+                 kids_prob+age_prob,
+                 comm_bracket*sociality)
+    
 # Workers location (community, home, or work) during the week during the night
   } else if(SiP == 0 & time_day == "N" & day_week %in% c("M", "T", "W", "R", "F")){
-    # all these things roughly normalized to 4 to input into sampling weights
-    age_prob <- age/20 # Older more likely to be at home
-    kids_prob <- ifelse(kids>0, 4, 1) # Have kids more likely to be at home
-    comm_prob <- 5-comm_bracket # lower income brackets, higher values
-    income_prob <- 5-income_bracket # lower income brackets, higher values
+
+    probs = cbind((kids_prob+age_prob)*3,
+                  income_prob,
+                  comm_bracket*sociality)
     
-    # Most likely at home
-    location = c(res_id, work_id, comm_id)[wrswoR::sample_int_crank(3, 1, 
-                                                                    prob = c((kids_prob+age_prob)*3,
-                                                                             income_prob,
-                                                                             comm_bracket))]
 # Workers location (community, home, or work) during the weekend, non-night
   } else if(SiP == 0 & time_day != "N" & day_week %in% c("S", "U")){
-    # all these things roughly normalized to 4 to input into sampling weights
-    age_prob <- age/20 # Older more likely to be at home
-    kids_prob <- ifelse(kids>0, 4, 1) # Have kids more likely to be at home
-    comm_prob <- 5-comm_bracket # lower income brackets, higher values
-    income_prob <- 5-income_bracket # lower income brackets, higher values
+
+    probs = cbind(kids_prob,
+                  income_prob,
+                  (age_prob+comm_bracket)*sociality)
     
-    # Most likely at home
-    location = c(res_id, work_id, comm_id)[wrswoR::sample_int_crank(3, 1, 
-                                                                    prob = c(kids_prob,
-                                                                             income_prob,
-                                                                             age_prob+comm_bracket))]
 # Workers location (community, home, or work) during the weekend night
   } else if(SiP == 0 & time_day == "N" & day_week %in% c("S", "U")){
-    # all these things roughly normalized to 4 to input into sampling weights
-    age_prob <- age/20 # Older more likely to be at home
-    kids_prob <- ifelse(kids>0, 4, 1) # Have kids more likely to be at home
-    comm_prob <- 5-comm_bracket # lower income brackets, higher values
-    income_prob <- 5-income_bracket # lower income brackets, higher values
+
+    probs = cbind((age_prob+kids_prob)*2,
+                  income_prob,
+                  comm_bracket*sociality)
     
-    # Most likely at home
-    location = c(res_id, work_id, comm_id)[wrswoR::sample_int_crank(3, 1, 
-                                                                    prob = c((age_prob+kids_prob)*2,
-                                                                             income_prob,
-                                                                             comm_bracket))]
 # Workers location during SiP weekday non-nights
   } else if(SiP == 1 & time_day != "N" & day_week %in% c("M", "T", "W", "R", "F")){
-    # all these things roughly normalized to 4 to input into sampling weights
-    age_prob <- age/20 # Older more likely to be at home
-    kids_prob <- ifelse(kids>0, 4, 1) # Have kids more likely to be at home
-    comm_prob <- 5-comm_bracket # lower income brackets, higher values
-    income_prob <- 5-income_bracket # lower income brackets, higher values
+
+    probs = cbind((age_prob+kids_prob)*2,
+                  income_prob*essential,
+                  comm_bracket*sociality)
     
-    # Most likely at home
-    location = c(res_id, work_id, comm_id)[wrswoR::sample_int_crank(3, 1, 
-                                                                    prob = c((age_prob+kids_prob)*2,
-                                                                             income_prob*essential,
-                                                                             comm_bracket))]
 # Workers location during SiP weekday nights
   } else if(SiP == 1 & time_day == "N" & day_week %in% c("M", "T", "W", "R", "F")){
-    # all these things roughly normalized to 4 to input into sampling weights
-    age_prob <- age/20 # Older more likely to be at home
-    kids_prob <- ifelse(kids>0, 4, 1) # Have kids more likely to be at home
-    comm_prob <- 5-comm_bracket # lower income brackets, higher values
-    income_prob <- 5-income_bracket # lower income brackets, higher values
-    
+
     # Most likely at home
-    location = c(res_id, work_id, comm_id)[wrswoR::sample_int_crank(3, 1, 
-                                                                    prob = c((age_prob+kids_prob)*4,
-                                                                             income_prob*essential,
-                                                                             comm_bracket))]
+    probs = cbind((age_prob+kids_prob)*4,
+                  income_prob*essential,
+                  comm_bracket*sociality)
+    
 # Workers location during SiP weekend non-nights
   } else if(SiP == 1 & time_day != "N" & day_week %in% c("S", "U")){
-    # all these things roughly normalized to 4 to input into sampling weights
-    age_prob <- age/20 # Older more likely to be at home
-    kids_prob <- ifelse(kids>0, 4, 1) # Have kids more likely to be at home
-    comm_prob <- 5-comm_bracket # lower income brackets, higher values
-    income_prob <- 5-income_bracket # lower income brackets, higher values
+
+    probs = cbind(age_prob+kids_prob,
+                  income_prob*essential,
+                  comm_bracket*sociality)
     
-    # Most likely at home
-    location = c(res_id, work_id, comm_id)[wrswoR::sample_int_crank(3, 1, 
-                                                                    prob = c(age_prob+kids_prob,
-                                                                             income_prob*essential,
-                                                                             comm_bracket))]
 # Workers location during SiP weekend nights
   } else if(SiP == 1 & time_day == "N" & day_week %in% c("S", "U")){
-     # all these things roughly normalized to 4 to input into sampling weights
-    age_prob <- age/20 # Older more likely to be at home
-    kids_prob <- ifelse(kids>0, 4, 1) # Have kids more likely to be at home
-    comm_prob <- 5-comm_bracket # lower income brackets, higher values
-    income_prob <- 5-income_bracket # lower income brackets, higher values
-    
-    # Most likely at home
-    location = c(res_id, work_id, comm_id)[wrswoR::sample_int_crank(3, 1, 
-                                                                    prob = c((age_prob+kids_prob)*3,
-                                                                             income_prob*essential,
-                                                                             comm_bracket))]
+    probs = cbind((age_prob+kids_prob)*3,
+                  income_prob*essential,
+                  comm_bracket*sociality)
   } else {
-    location = NA
+    stop("Worker situation not recognized")
   }
+    
+# Determine locations    
+  location <- rep(NA_integer_, n)
+  
+  l_samps <- apply(probs, 1, function(p){wrswoR::sample_int_crank(3, 1, p)})
+                   
+  location[l_samps == 1] <- res_id[l_samps == 1]
+  location[l_samps == 2] <- work_id[l_samps == 2]  
+  location[l_samps == 3] <- comm_id[l_samps == 3]
+  
+# Workers who are sick or tested positive stay home
+  at.home <- inf.state %in% c("Im", "Imh") | tested == 1
+  location[at.home] <- res_id[at.home]
+  
   return(location)
 
 }
