@@ -23,7 +23,7 @@ t_latent <- function(shape.l=5, scale.l=1){
 #' @return numeric of time spent in presymptomatic period (Ip)
 #' @export
 #'        
-t_presymp <- function(shape.ip=1,scale.ip=2){
+t_presymp <- function(shape.ip=2.5,scale.ip=1){
   rgamma(1, shape.ip, scale.ip)
 } 
 
@@ -50,7 +50,7 @@ t_asymp <- function(shape.ia = 6, scale.ia = 1){
 #' @return numeric of time spent in mildly symptomatic (Im)
 #' @export
 #'        
-t_msymp <- function(exp.im = 1/9) {
+t_msymp <- function(exp.im = 1/6) {
   rexp(1, exp.im)
 }
 
@@ -91,15 +91,20 @@ t_sevsymp <- function(shape.ih = 3, scale.ih = 0.25){
 #' @return numeric of probability of having symptoms.
 #' @export
 #'
-p_symp <- function(age) {dplyr::case_when(age %in% c(0:9) ~ 0.03,
-                                          age %in% c(10:19) ~ 0.05,
-                                          age %in% c(20:29) ~ 0.3,
-                                          age %in% c(30:39) ~ 0.55,
-                                          age %in% c(40:49) ~ 0.61,
-                                          age %in% c(50:59) ~ 0.75,
-                                          age %in% c(60:69) ~ 0.89,
-                                          age %in% c(70:79) ~ 0.9,
-                                          age >= 80 ~ 0.9)}
+p_symp <- function(age){
+  n <- length(age)
+  n[age %in% c(0:9)] <- 0.03
+  n[age %in% c(10:19)] <- 0.05
+  n[age %in% c(20:29)] <- 0.3
+  n[age %in% c(30:39)] <- 0.55
+  n[age %in% c(40:49)] <- 0.61
+  n[age %in% c(50:59)] <- 0.75
+  n[age %in% c(60:69)] <- 0.89
+  n[age %in% c(70:79)] <- 0.9
+  n[age >= 80] <- 0.9
+  
+  return(n)
+}
 
 #' @title Probability of severely symptomatic (will be hospitalized) infection
 #'  
@@ -110,15 +115,18 @@ p_symp <- function(age) {dplyr::case_when(age %in% c(0:9) ~ 0.03,
 #' @return numeric of probability of having severe symptoms.
 #' @export
 #'
-p_sevsymp <- function(age) {dplyr::case_when(age %in% c(0:9) ~ 0.004,
-                                             age %in% c(10:19) ~ 0.004,
-                                             age %in% c(20:29) ~ 0.01,
-                                             age %in% c(30:39) ~ 0.04,
-                                             age %in% c(40:49) ~ 0.09,
-                                             age %in% c(50:59) ~ 0.13,
-                                             age %in% c(60:69) ~ 0.19,
-                                             age %in% c(70:79) ~ 0.2,
-                                             age >= 80 ~ 0.25)}
+p_sevsymp <- function(age){
+  n <- length(age)
+  n[age %in% c(0:9)] <- 0.004
+  n[age %in% c(10:19)] <- 0.004
+  n[age %in% c(20:29)] <- 0.01
+  n[age %in% c(30:39)] <- 0.04
+  n[age %in% c(40:49)] <- 0.09
+  n[age %in% c(50:59)] <- 0.13
+  n[age %in% c(60:69)] <- 0.19
+  n[age %in% c(70:79)] <- 0.2
+  n[age >= 80] <- 0.25 
+}
 
 #' @title Probability of death
 #'  
@@ -129,15 +137,18 @@ p_sevsymp <- function(age) {dplyr::case_when(age %in% c(0:9) ~ 0.004,
 #' @return numeric of probability of dying.
 #' @export
 #'
-p_mort <- function(age) {dplyr::case_when(age %in% c(0:9) ~ 0.01,
-                                          age %in% c(10:19) ~ 0.0205,
-                                          age %in% c(20:29) ~ 0.031,
-                                          age %in% c(30:39) ~ 0.0475,
-                                          age %in% c(40:49) ~ 0.0785,
-                                          age %in% c(50:59) ~ 0.12,
-                                          age %in% c(60:69) ~ 0.186,
-                                          age %in% c(70:79) ~ 0.3,
-                                          age >= 80 ~ 0.45)}
+p_mort <- function(age) {
+    n <- length(age)
+    n[age %in% c(0:9)] <- 0.01
+    n[age %in% c(10:19)] <- 0.0205
+    n[age %in% c(20:29)] <- 0.031
+    n[age %in% c(30:39)] <- 0.0475
+    n[age %in% c(40:49)] <- 0.0785
+    n[age %in% c(50:59)] <- 0.12
+    n[age %in% c(60:69)] <- 0.186
+    n[age %in% c(70:79)] <- 0.3
+    n[age >= 80] <- 0.45
+}
 
 #' @title Time til Next state
 #' 
@@ -162,10 +173,28 @@ t_til_nxt <- function(pre.status){
     } else if(pre.status == "Ih"){
       t_sevsymp()
     } else {
-      NA
+      NA_real_
     }
   }  
 
+t_til_nxt <- function(pre.status){
+  n <- rep(NA_real_, length(pre.status))
+  n_E <- sum(pre.status == "E")
+  n_Ip <- sum(pre.status == "Ip")
+  n_Ia <- sum(pre.status == "Ia")
+  n_Im <- sum(pre.status == "Im")
+  n_Imh <- sum(pre.status == "Imh")
+  n_Ih <- sum(pre.status == "Ih")
+  
+  n[pre.status == "E"] <- replicate(n_E, t_latent())
+  n[pre.status == "Ip"] <- replicate(n_Ip, t_presymp())
+  n[pre.status == "Ia"] <- replicate(n_Ia, t_asymp())
+  n[pre.status == "Im"] <- replicate(n_Im, t_msymp())
+  n[pre.status == "Imh"] <- replicate(n_Imh, t_mtosev())
+  n[pre.status == "Ih"] <- replicate(n_Ih, t_sevsymp())
+
+  return(n)
+}  
 
 #' @title Next State
 #' 
@@ -178,32 +207,21 @@ t_til_nxt <- function(pre.status){
 #' @export
 
 next_state <- function(pre.status, age){
-  if (pre.status == "E"){
-    post.status <- "Ip"
-  } else if (pre.status == "Ip"){
-    symp <- rbinom(1, 1, p_symp(age = age))
-    if(symp == 0){
-      post.status <- "Ia"
-    } else {
-      sevsymp <- rbinom(1, 1, p_sevsymp(age = age))
-      if(sevsymp == 1){
-        post.status <- "Imh"
-      } else {
-        post.status <- "Im"
-      }
-    }
-  } else if (pre.status == "Imh"){
-    post.status <- "Ih"
-  } else if (pre.status == "Ih"){
-    died <- rbinom(1, 1, p_mort(age = age))
-    if(died == 1){
-      post.status <- "D"
-    } else {
-      post.status <- "R"
-    }
-  } else if (pre.status %in% c("Im", "Ia")){
-    post.status <- "R"
-  }  
+  n <- length(pre.status)
+  post.status <- rep("R", n)
+  p_symps <- p_symp(age)
+  p_sevsymps <- p_sevsymp(age)
+  p_deads <- p_mort(age)
+  p1 <- dqrunif(n)
+  p2 <- dqrunif(n)
+  
+  post.status[pre.status == "E"] <- "Ip"
+  post.status[pre.status == "Ip" & p1>p_symps] <- "Ia"
+  post.status[pre.status == "Ip" & p1<p_symps & p2>p_sevsymps] <- "Im"
+  post.status[pre.status == "Ip" & p1<p_symps & p2<p_sevsymps] <- "Imh"
+  post.status[pre.status == "Imh"] <- "Ih"
+  post.status[pre.status == "Ih" & p1<p_deads] <- "D"
+
   return(post.status)
 }
 
@@ -243,7 +261,7 @@ get_foi <- function(location, n_transmitting, res_size, work_size, school_size, 
 #'        
 
 foi_infect <- function(foi){
-  as.numeric(dqrunif(1,0,1)<(1-exp(-foi)))
+  as.numeric(dqrunif(length(foi),0,1)<(1-exp(-foi)))
 }
 
 #' @title Generate Infections
@@ -304,35 +322,4 @@ test_folks <- function(inf.states, test.prior, test.probs, n.tests){
   test.prior[pos.tests] <- paste0(inf.states[pos.tests], "T")
   
   return(test.prior)
-}
-
-#' @title ABM quarantine
-#' 
-#' @description Quarantine individuals based on their test and infection status
-#' 
-#' @param inf.vec vector of individual infection states
-#' @param test.vec vector of individual testing status
-#' @param q.prob vector of individual probabilities of being quarantined
-#' 
-#' @return vector of NAs and Ts with Ts corresponding to individuals who tested positive
-#' @export
-#' 
-
-quarantine <- function(inf.vec, test.vec, q.prob){
-  #Indices of individuals who are infected with symptoms  
-  infection.indices <- which(inf.vec %in% c("Im", "Imh"))
-  
-  #Indices of individuals who have been tested and identified as infectious 
-  tested.indices <- which(!is.na(test.vec))
-
-  poss_q <- unique(c(infection.indices, tested.indices))
-
-  #Bernoulli trial for those with symptoms and those tested on whether they'll quarantine
-  q10 <- rep(0, length(inf.vec))
-  qs <- sapply(q.prob[poss_q], function(p){ rbinom(1,1,p) })
-  
-  q10[poss_q] <- qs
-  
-  # Return binary vector with q=1 for those who will quarantine
-  return(q10)
 }
