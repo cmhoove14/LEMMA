@@ -221,8 +221,7 @@ for(t in 2:(t.tot/dt)){
   }
   
 # Simulate infection --------------------
-# Assumes all agents are at home, not interacting in two nighttime time steps  
-  if(nrow(agents[state %!in% c("S", "E", "D", "R")])>0 & time_day != "N"){
+  if(nrow(agents[state %!in% c("S", "E", "D", "R")])>0){
 # Determine locations
 # Find locations of those not deceased or in the hospital  
   # Agents that are in school
@@ -289,8 +288,6 @@ run.end <- Sys.time()
 
 run.end-run.start
 
-saveRDS(rbindlist(test_reports), paste0("CMH/ABM/Analysis/Outputs/simulated_testing", Sys.Date(),".rds"),
-        fill = TRUE)
-saveRDS(rbindlist(infection_reports), paste0("CMH/ABM/Analysis/Outputs/simulated_infections", Sys.Date(),".rds"),
-        fill = TRUE)
+saveRDS(rbindlist(test_reports,fill = TRUE), paste0("CMH/ABM/Analysis/Outputs/simulated_testing", Sys.Date(),".rds"))
+saveRDS(rbindlist(infection_reports, fill = TRUE), paste0("CMH/ABM/Analysis/Outputs/simulated_infections", Sys.Date(),".rds"))
 saveRDS(inf.dt, paste0("CMH/ABM/Analysis/Outputs/population_infection", Sys.Date(), ".rds"))
