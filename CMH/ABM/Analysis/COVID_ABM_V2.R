@@ -250,11 +250,10 @@ for(t in 2:(t.tot/dt)){
   
   # Agents that are neight in school or are working
   agents[work < 0 & school < 0 & state %!in% c("Ih", "D"),
-         location:=mapply(LEMMAABM::other_location, 
-                          state, tested,
-                          sip.active, time_day, 
-                          age, residence_type, comm_bracket, 
-                          residence, nbhd)]
+         location:=LEMMAABM::other_location(state, tested,
+                                            sip.active, time_day, 
+                                            age, sociality, residence_type, comm_bracket, 
+                                            residence, nbhd)]
   
   print("Locations resolved")
 # Determine number of transmitting individuals by location  
