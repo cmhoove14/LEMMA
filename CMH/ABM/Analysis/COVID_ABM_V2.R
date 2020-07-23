@@ -33,6 +33,7 @@ agents <- readRDS("CMH/ABM/data/sf_synthetic_agents_dt.rds")
   agents$nbhd <- as.integer(agents$nbhd)
   agents$school <- as.integer(agents$school)
   agents$work <- as.integer(agents$work)
+  agents$work[is.na(agents$work)] <- -1
   
   setkey(agents, residence)
 
@@ -162,7 +163,7 @@ tests_pars <- fitdist(tail(sf_test$tests, 30), "nbinom", "mme")$estimate
    
 # Update characteristics of initial infections  
   # Transition time
-  agents[state %!in% c("S", "D", "R"), tnext::LEMMAABM::t_til_nxt(state)]
+  agents[state %!in% c("S", "D", "R"), tnext:=LEMMAABM::t_til_nxt(state)]
   # State entering once transition time expires
   agents[state %!in% c("S", "D", "R"), nextstate:=LEMMAABM::next_state(state, age)]
   #Time initial infections occurred
@@ -261,9 +262,9 @@ for(t in 2:(t.tot/dt)){
   agents[, n_transmitting:=sum(state %in% c("Ip", "Ia", "Im", "Imh")), by = location]
   
 # Determine FOI for susceptible individuals in location where someone is transmitting
-  agents[n_transmitting > 0 & state == "S", FOI:=mapply(LEMMAABM::get_foi, location, n_transmitting, 
-                                                        res_size, work_size, school_size, comm_size, 
-                                                        MoreArgs = list(trans_rate = bta))]
+  agents[n_transmitting > 0 & state == "S", FOI:=LEMMAABM::get_foi(location, n_transmitting, 
+                                                                   res_size, work_size, school_size, comm_size, 
+                                                                   bta)]
   
 # Generate infections, update their state, sample for their nextstate and time until reaching it
     agents[n_transmitting > 0 & state == "S", infect:=LEMMAABM::foi_infect(FOI)]
