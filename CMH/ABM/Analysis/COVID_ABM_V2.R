@@ -34,6 +34,7 @@ agents <- readRDS("CMH/ABM/data/sf_synthetic_agents_dt.rds")
   agents$school <- as.integer(agents$school)
   agents$work <- as.integer(agents$work)
   agents$work[is.na(agents$work)] <- -1
+  agents[is.na(income), c("income", "income_bracket", "comm_bracket"):=0]
   
   setkey(agents, residence)
 
