@@ -4,9 +4,11 @@
 \alias{t_mtosev}
 \title{Symptom onset to hospitalization}
 \usage{
-t_mtosev(shape.imh = 7, scale.imh = 2)
+t_mtosev(n_Imh, shape.imh = 7, scale.imh = 2)
 }
 \arguments{
+\item{n_Imh}{number of draws}
+
 \item{shape.imh}{shape of gamma distn}
 
 \item{scale.imh}{scale of gamma distn}

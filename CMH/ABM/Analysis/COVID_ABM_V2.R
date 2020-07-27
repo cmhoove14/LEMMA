@@ -29,11 +29,19 @@ source("CMH/Data/Get_COVID_Cal_latest.R")
 # synthetic agents from FRED/RTI
 agents <- readRDS("CMH/ABM/data/sf_synthetic_agents_dt.rds")
 
+# Make all possible locations integers
   agents$residence <- as.integer(agents$residence)
   agents$nbhd <- as.integer(agents$nbhd)
   agents$school <- as.integer(agents$school)
   agents$work <- as.integer(agents$work)
+  agents$office_id <- as.integer(as.factor(agents$office_id))
+  agents$class_id <- max(agents$office_id, na.rm = T) + as.integer(as.factor(agents$class_id))
+  
+# 1000 or so agents with both workplaces and schools (i.e. both go to school and go to work), just send them to school for simplicity  
+  agents[work>0 & school>0, work:=-1]
+# Replace NAs with -1  
   agents$work[is.na(agents$work)] <- -1
+# Replace NAs with 0  
   agents[is.na(income), c("income", "income_bracket", "comm_bracket"):=0]
   
   setkey(agents, residence)
@@ -47,7 +55,7 @@ agents <- readRDS("CMH/ABM/data/sf_synthetic_agents_dt.rds")
 N <- nrow(agents)  
 
 #San Francisco neighborhoods matrix
-sf_nbhds <- readRDS("CMH/ABM/data/sf_nbhd_distance_matrix.rds")
+#sf_nbhds <- readRDS("CMH/ABM/data/sf_nbhd_distance_matrix.rds")
 
 # PCR sensitivity data
 pcr_sens <- readRDS("CMH/ABM/data/PCR_Sens_Kucirka.rds")
@@ -231,15 +239,6 @@ for(t in 2:(t.tot/dt)){
              state, tested, scl.closed, sip.active,
              time_day, day_week, comm_bracket, age, sociality,
              residence, school, nbhd)]
-
-  # Agents that are both in school and have a job
-    agents[school >0 & work  >0 & state %!in% c("Ih", "D"),
-           location:=mapply(LEMMAABM::sac_worker_location,
-                            state, tested,
-                            scl.closed, sip.active, time_day, day_week,
-                            sociality, comm_bracket, 
-                            residence, school, work, nbhd)]
-  
   
   # Agents that are workers only
   agents[school < 0 & work > 0 & state %!in% c("Ih", "D"), 
@@ -249,30 +248,42 @@ for(t in 2:(t.tot/dt)){
                                              comm_bracket, income_bracket, 
                                              residence, work, nbhd)]
   
-  # Agents that are neight in school or are working
+  # Agents that are neither in school or are working
   agents[work < 0 & school < 0 & state %!in% c("Ih", "D"),
          location:=LEMMAABM::other_location(state, tested,
                                             sip.active, time_day, 
                                             age, sociality, residence_type, comm_bracket, 
                                             residence, nbhd)]
   
+  # Smaller sub-locations (offices and classrooms) for agents in workplaces or schools
+  agents[state %!in% c("Ih", "D") & !is.na(location),
+         small_location:=location_small(location, work, school, office_id, class_id)]
+  
   print("Locations resolved")
-# Determine number of transmitting individuals by location  
+# Determine number of individuals and transmitting individuals by location  
   agents[, n_transmitting:=sum(state %in% c("Ip", "Ia", "Im", "Imh")), by = location]
+  agents[n_transmitting > 0, n_present:=.N, by = location]
+  
+  agents[n_transmitting > 0, n_transmitting_small:=sum(state %in% c("Ip", "Ia", "Im", "Imh")), by = small_location]
+  agents[n_transmitting_small > 0, n_present_small:=.N, by = small_location]
   
 # Determine FOI for susceptible individuals in location where someone is transmitting
-  agents[n_transmitting > 0 & state == "S", FOI:=LEMMAABM::get_foi(location, n_transmitting, 
-                                                                   res_size, work_size, school_size, comm_size, 
-                                                                   bta)]
+  agents[n_transmitting > 0 & state == "S", FOI:=LEMMAABM::get_foi(n_transmitting, n_present, bta)]
   
+# For agents sharing small location, overwrite lower FOI with small location FOI 
+  agents[n_transmitting_small > 0 & state == "S", FOI:=LEMMAABM::get_foi(n_transmitting_small, n_present_small, bta)]
+ 
 # Generate infections, update their state, sample for their nextstate and time until reaching it
-    agents[n_transmitting > 0 & state == "S", infect:=LEMMAABM::foi_infect(FOI)]
+    agents[FOI > 0 & state == "S", infect:=LEMMAABM::foi_infect(FOI)]
     agents[infect == 1, state:="E"]
     agents[infect == 1, nextstate:=LEMMAABM::next_state(state, age)]
     agents[infect == 1, tnext:=LEMMAABM::t_til_nxt(state)]
     
-# Reset infection columns
-    agents[, c("n_transmitting", "FOI", "infect"):=NA_real_]
+# Reset infection & location columns
+    agents[, c("location", "small_location",
+               "n_transmitting", "n_transmitting_small", 
+               "n_present", "n_present_small",
+               "FOI", "infect"):=NA_real_]
     
 # Store detailed infection info
     infection_reports[[t-1]] <- agents[state %!in% c("S", "D", "R")]

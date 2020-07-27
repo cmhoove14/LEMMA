@@ -10,6 +10,7 @@ other_location(
   SiP,
   time_day,
   age,
+  sociality,
   res_type,
   comm_bracket,
   res_id,
@@ -26,6 +27,8 @@ other_location(
 \item{time_day}{time of day (night or day)}
 
 \item{age}{age of person}
+
+\item{sociality}{agent sociality}
 
 \item{res_type}{type of residence (H, C, P, or N)}
 

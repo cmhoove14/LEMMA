@@ -221,7 +221,7 @@ set.seed(430)
   agents[, res_elders:=sum(age %in% c(65:120)), by=residence]
   
 # Add income bracket  
-  agents[residence_type == "H", income_bracket:=cut(income, c(0, 50, 100, 1000)*1000, labels = FALSE, include.lowest = TRUE)]
+  agents[residence_type == "H", income_bracket:=cut(income, c(0, 50, 100, 10000)*1000, labels = FALSE, include.lowest = TRUE)]
   
 # Add workplace size
   agents[work > 0, work_size:=.N, by = work]

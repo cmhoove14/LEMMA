@@ -1,26 +1,3 @@
-#' @title Agent Locations
-#'  
-#' @description Function to determine agent's location given present model conditions
-#' 
-#' @param l_res residence location id
-#' @param l_com community location id
-#' @param l_scl work/school location id
-#' @param p_res probability of being at residence
-#' @param p_com probability of being in community
-#' 
-#' @return vector of location ids
-#' @export
-#' 
-agent_location <- function(inf.state, tested,
-                           scl, SiP, time_day, day_week,
-                           sociality, comm_bracket, 
-                           res_id, scl_id, work_id, comm_id){
-  n <- length(inf.state)
-  rn <- dqrunif(n)
-  
-  
-}
-
 #' @title Sample location
 #'  
 #' @description Function to determine agent's location given present model conditions. Works for agents with 3 possible locations residence/home, community and either work or school. Function passes location ids plus probability of home and community, with probability work/ school then implied
@@ -34,15 +11,15 @@ agent_location <- function(inf.state, tested,
 #' @return vector of location ids
 #' @export
 #' 
-scl_loc <- function(l_res, l_com, l_scl, p_res, p_com){
+scl_wrk_loc <- function(l_res, l_com, l_scl_wrk, p_res, p_com){
   n <- length(l_res)
   #print(n)
-  u <- runif(n)
+  u <- dqrunif(n)
   samp <- l_com
   index <- u < p_res
   samp[index] <- l_res[index]
   index <- u > (p_res + p_com)
-  samp[index] <- l_scl[index]
+  samp[index] <- l_scl_wrk[index]
   return(samp)
   
 }
@@ -59,10 +36,13 @@ scl_loc <- function(l_res, l_com, l_scl, p_res, p_com){
 
 comm_loc <- function(comm, nbhd_mat){
   nobs <- length(comm)
-  nbrs <- 
-  cp <- dqrunif(nobs)
+  nbrs <- nbhd_mat[comm,]
+  
+  nbrs_sum <- colSums2(nbrs)
+  nbrs[,nbrs_sum>0]
   
 # Determine if agent is in own neighborhood, neighboring neighborhood, or randomly chosen neighborhood with probabilities 89%, 10%, 1% respectively  
+  cp <- dqrunif(nobs)
   out <- comm
   out[cp > 0.89 & cp < 0.99] <- nbhd_mat[comm]
   out[cp > 0.99] <- dqrng::dqsample.int(nrow(nbhd_mat),1)
@@ -178,7 +158,7 @@ sac_location <- function(inf.state, tested,
   at.home <- inf.state %in% c("Im", "Imh") | tested == 1
   location <- rep(NA_integer_, n)
   location[at.home] <- res_id[at.home]
-  location[!at.home] <- scl_loc(res_id[!at.home],comm_id[!at.home], scl_id[!at.home],  probs[!at.home, 1], probs[!at.home, 2])
+  location[!at.home] <- scl_wrk_loc(res_id[!at.home],comm_id[!at.home], scl_id[!at.home],  probs[!at.home, 1], probs[!at.home, 2])
 
   return(location)
 }
@@ -213,7 +193,7 @@ worker_location <- function(inf.state, tested,
   
     n <- length(inf.state)
 
-    # all these things roughly normalized to 4 to input into sampling weights
+  # all these things roughly normalized to 4 to input into sampling weights
     age_prob <- age/20 # Older more likely to be at home
     kids_prob <- ifelse(kids>0, 4, 1) # Have kids more likely to be at home
     comm_prob <- 5-comm_bracket # lower income brackets, higher values
@@ -223,80 +203,77 @@ worker_location <- function(inf.state, tested,
   if(SiP == 0 & time_day %in% c("M", "E") & day_week %in% c("M", "T", "W", "R", "F")){
     
     probs = cbind(age_prob+kids_prob,
-                  income_prob,
-                  comm_bracket*sociality)
+                  comm_bracket*sociality,
+                  income_prob)
     
 # Workers location (community, home, or work) during the week during the day
   } else if(SiP == 0 & time_day == "D" & day_week %in% c("M", "T", "W", "R", "F")){
     
     probs = cbind(income_prob,
-                 kids_prob+age_prob,
-                 comm_bracket*sociality)
+                 comm_bracket*sociality,
+                 kids_prob+age_prob)
     
 # Workers location (community, home, or work) during the week during the night
   } else if(SiP == 0 & time_day == "N" & day_week %in% c("M", "T", "W", "R", "F")){
 
     probs = cbind((kids_prob+age_prob)*3,
-                  income_prob,
-                  comm_bracket*sociality)
+                  comm_bracket*sociality,
+                  income_prob)
     
 # Workers location (community, home, or work) during the weekend, non-night
   } else if(SiP == 0 & time_day != "N" & day_week %in% c("S", "U")){
 
     probs = cbind(kids_prob,
-                  income_prob,
-                  (age_prob+comm_bracket)*sociality)
+                  (age_prob+comm_bracket)*sociality,
+                  income_prob)
     
 # Workers location (community, home, or work) during the weekend night
   } else if(SiP == 0 & time_day == "N" & day_week %in% c("S", "U")){
 
     probs = cbind((age_prob+kids_prob)*2,
-                  income_prob,
-                  comm_bracket*sociality)
+                  comm_bracket*sociality,
+                  income_prob)
     
 # Workers location during SiP weekday non-nights
   } else if(SiP == 1 & time_day != "N" & day_week %in% c("M", "T", "W", "R", "F")){
 
     probs = cbind((age_prob+kids_prob)*2,
-                  income_prob*essential,
-                  comm_bracket*sociality)
+                  comm_bracket*sociality,
+                  income_prob*essential)
     
 # Workers location during SiP weekday nights
   } else if(SiP == 1 & time_day == "N" & day_week %in% c("M", "T", "W", "R", "F")){
 
-    # Most likely at home
     probs = cbind((age_prob+kids_prob)*4,
-                  income_prob*essential,
-                  comm_bracket*sociality)
+                 comm_bracket*sociality,
+                 income_prob*essential)
     
 # Workers location during SiP weekend non-nights
   } else if(SiP == 1 & time_day != "N" & day_week %in% c("S", "U")){
 
     probs = cbind(age_prob+kids_prob,
-                  income_prob*essential,
-                  comm_bracket*sociality)
+                  comm_bracket*sociality,
+                  income_prob*essential)
     
 # Workers location during SiP weekend nights
   } else if(SiP == 1 & time_day == "N" & day_week %in% c("S", "U")){
     probs = cbind((age_prob+kids_prob)*3,
-                  income_prob*essential,
-                  comm_bracket*sociality)
+                  comm_bracket*sociality,
+                  income_prob*essential)
   } else {
     stop("Worker situation not recognized")
   }
     
 # Determine locations    
-  location <- rep(NA_integer_, n)
-  
-  l_samps <- apply(probs, 1, function(p){wrswoR::sample_int_crank(3, 1, p)})
-                   
-  location[l_samps == 1] <- res_id[l_samps == 1]
-  location[l_samps == 2] <- work_id[l_samps == 2]  
-  location[l_samps == 3] <- comm_id[l_samps == 3]
-  
 # Workers who are sick or tested positive stay home
   at.home <- inf.state %in% c("Im", "Imh") | tested == 1
+  location <- rep(NA_integer_, n)
   location[at.home] <- res_id[at.home]
+  
+  t_prob <- rowSums(probs)
+  norm_probs <- probs/t_prob
+    
+  location[!at.home] <- scl_wrk_loc(res_id[!at.home], comm_id[!at.home], work_id[!at.home], norm_probs[!at.home, 1], norm_probs[!at.home, 2])
   
   return(location)
 
@@ -360,6 +337,29 @@ other_location <- function(inf.state, tested,
   return(location)
 }
 
+#' @title Small location
+#'  
+#' @description Function to allocate agent locations to smaller subunits( offices and classes) from larger areas (workplaces and schools)
+#' 
+#' @param l_res residence location id
+#' @param l_com community location id
+#' @param l_scl work/school location id
+#' @param p_res probability of being at residence
+#' @param p_com probability of being in community
+#' 
+#' @return vector of location ids
+#' @export
+#' 
+location_small <- function(l_id, work_id, school_id, office_id, class_id){
+  classes <- l_id == school_id
+  offices <- l_id == work_id
+
+  l_id[classes] <- class_id[classes]
+  l_id[offices] <- office_id[offices]
+  
+  return(l_id)
+  
+}
 
 #' @title Quarantine symptomatics
 #'  

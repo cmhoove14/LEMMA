@@ -4,9 +4,11 @@
 \alias{t_presymp}
 \title{Presymptomatic period}
 \usage{
-t_presymp(shape.ip = 2, scale.ip = 1)
+t_presymp(n_Ip, shape.ip = 2, scale.ip = 1)
 }
 \arguments{
+\item{n_Ip}{Number of draws}
+
 \item{shape}{Shape of gamma distribution}
 
 \item{scale}{Scale of gamma distribution}

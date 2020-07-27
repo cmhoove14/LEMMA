@@ -4,9 +4,11 @@
 \alias{t_sevsymp}
 \title{time spent severely symptomatic (in hospital)}
 \usage{
-t_sevsymp(shape.ih = 3, scale.ih = 0.25)
+t_sevsymp(n_Ih, shape.ih = 3, scale.ih = 0.25)
 }
 \arguments{
+\item{n_Ih}{number of draws}
+
 \item{shape.ih}{shape of gamma distn}
 
 \item{scale.ih}{scale of gamma distn}

@@ -4,9 +4,11 @@
 \alias{t_asymp}
 \title{Asymptomatic period}
 \usage{
-t_asymp(shape.ia = 6, scale.ia = 1)
+t_asymp(n_Ia, shape.ia = 6, scale.ia = 1)
 }
 \arguments{
+\item{n_Ia}{Number of draws}
+
 \item{shape.ia}{Shape of gamma distribution}
 
 \item{scale.ia}{Scale of gamma distribution}

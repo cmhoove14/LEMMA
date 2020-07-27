@@ -4,9 +4,11 @@
 \alias{t_latent}
 \title{latent period}
 \usage{
-t_latent(shape.l = 5, scale.l = 1)
+t_latent(n_E, shape.l = 5, scale.l = 1)
 }
 \arguments{
+\item{n_E}{Number of draws}
+
 \item{shape.l}{Shape of gamma distribution}
 
 \item{scale.l}{Scale of gamma distribution}

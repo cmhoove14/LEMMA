@@ -2,34 +2,20 @@
 % Please edit documentation in R/ABM_infection_functions.R
 \name{get_foi}
 \alias{get_foi}
-\title{Person's FOI}
+\title{Person's FOI in large areas}
 \usage{
-get_foi(
-  location,
-  n_transmitting,
-  res_size,
-  work_size,
-  school_size,
-  comm_size,
-  trans_rate
-)
+get_foi(I, N, bta)
 }
 \arguments{
-\item{location}{Location of this person}
+\item{I}{Location of this person}
 
-\item{n_transmitting}{number f infectious people transmitting}
+\item{N}{number f infectious people transmitting}
 
-\item{res_size}{population of this person's residence}
-
-\item{work_size}{population of this person's workplace}
-
-\item{school_size}{population of this person's school}
-
-\item{comm_size}{population of this person's community}
+\item{bta}{transmission probability}
 }
 \value{
 FOI for this person
 }
 \description{
-Determine FOI from location
+Determine FOI from locations with infectious individuals in large areas: schools, workplaces, communities (as opposed to corresponding small areas: classrooms, offices, homes)
 }
