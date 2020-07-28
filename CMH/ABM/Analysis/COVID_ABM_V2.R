@@ -54,8 +54,8 @@ agents <- readRDS("CMH/ABM/data/sf_synthetic_agents_dt.rds")
   
 N <- nrow(agents)  
 
-#San Francisco neighborhoods matrix
-#sf_nbhds <- readRDS("CMH/ABM/data/sf_nbhd_distance_matrix.rds")
+#San Francisco neighborhoods matrix list
+ nbhd_mat_list <- readRDS("CMH/ABM/data/sf_nbhd_mat_list.rds")
 
 # PCR sensitivity data
 pcr_sens <- readRDS("CMH/ABM/data/PCR_Sens_Kucirka.rds")
@@ -123,7 +123,7 @@ t.sip <- c(rep(0, as.numeric(sip.start-t0)/dt),
 t.scl <- c(rep(0, as.numeric(scl.close-t0)/dt),
            rep(1, as.numeric(t.end-scl.close)/dt))
 
-bta = 0.1 # transmission probability per contact from https://www.medrxiv.org/content/10.1101/2020.05.10.20097469v1.full.pdf+html ; https://doi.org/10.1073/pnas.2008373117
+bta = 0.02 # transmission probability per contact from https://www.medrxiv.org/content/10.1101/2020.05.10.20097469v1.full.pdf+html ; https://doi.org/10.1073/pnas.2008373117
 
 # Tests conducted
 tests_pars <- fitdist(tail(sf_test$tests, 30), "nbinom", "mme")$estimate
@@ -161,8 +161,8 @@ tests_pars <- fitdist(tail(sf_test$tests, 30), "nbinom", "mme")$estimate
   agents[id %in% init.Es, state:="E"]
   
 # Keep track of everyone's infection status through time   
-  inf.dt <- agents[ , .(id)]
-  inf.dt[, state1:=agents[,state]]
+  epi_curve <- matrix(NA, nrow = t.tot/dt, ncol = 9)
+    epi_curve[1,] <- sum.inf(agents[,state])
   
 # Get test data through time
   test_reports <- list()
@@ -255,6 +255,9 @@ for(t in 2:(t.tot/dt)){
                                             age, sociality, residence_type, comm_bracket, 
                                             residence, nbhd)]
   
+  agents[state %!in% c("Ih", "D") & location == nbhd, 
+         location:=comm_loc(location, nbhd_mat_list)]
+  
   # Smaller sub-locations (offices and classrooms) for agents in workplaces or schools
   agents[state %!in% c("Ih", "D") & !is.na(location),
          small_location:=location_small(location, work, school, office_id, class_id)]
@@ -290,8 +293,7 @@ for(t in 2:(t.tot/dt)){
     print("New infections generated")
   }
   
-  state_time <- paste0("state",t)
-    inf.dt[, (state_time):=agents[,state]]
+  epi_curve[t,] <- sum.inf(agents[,state])
   # On to the next one  
     
 }  

@@ -55,7 +55,22 @@ sf.hh.sf <- sf.hh %>%
   sf.coords <- sp::coordinates(sf.sp)  # Coordinates of polygon centers
   sf.nbs <- spdep::poly2nb(sf.sp)  # Neighbour relationships based on triangulation
   sf.wmat <- spdep::nb2mat(sf.nbs)  # Weight matrix between the nodes.
+  
   saveRDS(sf.wmat, "CMH/ABM/data/sf_nbhd_distance_matrix.rds")
+
+#Refine for fast community movement function; generate list of neighbors
+  n_comm <- nrow(sf.wmat)
+
+  nbhd_mat_cdf <- matrix(1, nrow = n_comm, ncol = 6)
+  nbhd_mat_index <- matrix(NA_integer_, nrow = n_comm, ncol = 6)
+  for (i in 1:n_comm) {
+    index <- which(sf.wmat[i, ] > 0)
+    nbhd_mat_cdf[i, 1:length(index)] <- cumsum(sf.wmat[i, index])
+    nbhd_mat_index[i, 1:length(index)] <- index
+  }
+  
+  nbhd_mat_list <- list(cdf = nbhd_mat_cdf, index = nbhd_mat_index)
+  saveRDS(nbhd_mat_list, "CMH/ABM/data/sf_nbhd_mat_list.rds")
 
 #----------------------------------------
 # Determine nbhds of workplaces

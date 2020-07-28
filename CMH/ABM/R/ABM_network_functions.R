@@ -24,31 +24,52 @@ scl_wrk_loc <- function(l_res, l_com, l_scl_wrk, p_res, p_com){
   
 }
 
+
+#' @title Community location utility function
+#'  
+#' @description 
+#' 
+#' @param mat_cdf 
+#' @param mat_index 
+#' 
+#' @return 
+#' @export
+#' 
+
+GetNbhd <- function(mat_cdf, mat_index) {
+  n <- nrow(mat_cdf)
+  r <- dqrunif(n)
+  index <- max.col(r < mat_cdf, "first")
+  mat_index[cbind(1:n, index)]
+}
+
 #' @title Community location
 #'  
-#' @description Function to randomly determine location if agent is not at work, home, or school. 10% chance of visiting neighboring community, 1% chance of visiting some random community. Requires `sf.wmat` in environment in order to determine neighboring and random communities to potential visit
+#' @description Function to randomly determine location if agent is not at work, home, or school. 10% chance of visiting neighboring community, 1% chance of visiting some random community.
 #' 
 #' @param comm community (neighborhood) of residence
+#' @param nbhd_mat_list list of neighbors for all neighborhoods
 #' 
 #' @return location of agent if they choose to be in the community
 #' @export
 #' 
 
-comm_loc <- function(comm, nbhd_mat){
-  nobs <- length(comm)
-  nbrs <- nbhd_mat[comm,]
-  
-  nbrs_sum <- colSums2(nbrs)
-  nbrs[,nbrs_sum>0]
-  
-# Determine if agent is in own neighborhood, neighboring neighborhood, or randomly chosen neighborhood with probabilities 89%, 10%, 1% respectively  
-  cp <- dqrunif(nobs)
+comm_loc <- function(comm, nbhd_mat_list){
   out <- comm
-  out[cp > 0.89 & cp < 0.99] <- nbhd_mat[comm]
-  out[cp > 0.99] <- dqrng::dqsample.int(nrow(nbhd_mat),1)
+  nobs <- length(comm)
+  cp <- dqrunif(nobs)
 
+  # Determine if agent is in own neighborhood, neighboring neighborhood, or randomly chosen neighborhood with probabilities 89%, 10%, 1% respectively
+  in_nbrs <- comm[cp > 0.89 & cp < 0.99]
+  in_rand <- comm[cp > 0.99]
+
+  # For each agent visiting neighboring neighborhood, sample from neighbors
+  out[in_nbrs] <- GetNbhd(nbhd_mat_list$cdf[comm[in_nbrs], ], nbhd_mat_list$index[comm[in_nbrs], ])
+
+  # For each agent visiting random neighborhood, sample randomly
+  out[in_rand] <- comm[sample.int(n = length(in_rand), size = length(in_rand), replace = T)]
+  
   return(out)
-         
 }
 
 #' @title Simulate school-aged children who are also workers' location
