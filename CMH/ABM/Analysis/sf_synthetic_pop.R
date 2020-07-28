@@ -48,7 +48,9 @@ sf.hh.sf <- sf.hh %>%
   st_as_sf(., coords = c("longitude", "latitude")) %>% 
   st_set_crs(sf.crs) %>% 
   st_join(., sf.grid.10km) %>% 
-  st_join(., bay_zips %>% dplyr::select(zip))
+  st_join(., bay_zips %>% dplyr::select(zip)) %>% 
+  left_join(sf.hh %>% dplyr::select(c("sp_id", "latitude", "longitude")),
+            by = "sp_id")
 
 # Get neighborhood matrix
   sf.sp <- as(sf.grid.10km, "Spatial")
@@ -94,7 +96,9 @@ sf.scl.sf <- sf.scl %>%
 sf.gq.sf <- sf.gq %>% 
   st_as_sf(., coords = c("longitude", "latitude")) %>% 
   st_set_crs(sf.crs) %>% 
-  st_join(., sf.grid.10km)
+  st_join(., sf.grid.10km) %>% 
+  left_join(sf.gq %>% dplyr::select(c("sp_id", "latitude", "longitude")),
+            by = "sp_id")
 
 #----------------------------------------
 # Determine workplaces close to group quarters and schools in order to assign some workers to working at group quarters and schools
@@ -206,6 +210,8 @@ set.seed(430)
     sociality = rbeta(nrow(sf.full), 2, 2),
     residence = sf.full$sp_res_id,
     residence_type = sf.full$gq_type,
+    lat = sf.full$latitude,
+    lon = sf.full$longitude,
     income = sf.full$hh_income,
     work = sf.full$work_loc,
     school = sf.full$school_id,
