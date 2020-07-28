@@ -137,3 +137,5 @@ sim_results <- parApply(cl, bta_E0_grid, 1,
                                                               test_fx))
 
 stopCluster(cl)  
+
+saveRDS(sim_results, "CMH/ABM/Analysis/Outputs/bta_e0_calibration_2020-07-28.rds")
