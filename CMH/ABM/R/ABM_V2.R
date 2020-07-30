@@ -67,7 +67,10 @@ covid_abm <- function(bta, E0, Ip0, Ia0, Im0, Imh0, Ih0, R0, D0,
 # Keep track of test data through time
   test_reports <- list()
 
-# Keep detailed infection status through time
+# Keep track of state transitions through time
+  transition_reports <- list()
+  
+# Keep record of infection events
   infection_reports <- list()
    
 # Update characteristics of initial infections  
@@ -89,9 +92,15 @@ for(t in 2:(t.tot/dt)){
   scl.closed <- scl_fx[t]
   
 # Advance transition times, time since infection, time since tested last
+  agents[, time:=t]
   agents[state %!in% c("S", "D", "R"), tnext:=tnext-dt]
   agents[state %!in% c("S", "D", "R"), t_infection:=t_infection+dt]
   agents[, t_since_test:=t_since_test+dt]
+  
+# Save record of state transitions
+  transition_reports[[t-1]] <- agents[tnext < 0 & state %!in% c("S", "D", "R"), .(id,age,race,state,nextstate,tested,test_public,test_private,
+                                                                                  residence,lat,lon,work,school,nbhd,ct,zip,time)]
+
   
 # Advance expired states to next state, determine new nextstate and time til next state
   agents[tnext < 0, state:=nextstate]
@@ -114,8 +123,8 @@ for(t in 2:(t.tot/dt)){
   # Test results and reset time since last test for those who were tested
     agents[id %in% testeds, tested:=LEMMAABM::test_sens(state, t_infection)]
     agents[id %in% testeds, t_since_test:=0]
-    tested_agents <- agents[id %in% testeds,]
-    test_reports[[(t-1)]] <- tested_agents[,time:=t]
+    test_reports[[(t-1)]] <- agents[id %in% testeds, .(id,age,race,state,nextstate,tested,test_public,test_private,
+                                                       residence,lat,lon,work,school,nbhd,ct,zip,time)]
     
 # print("Testing conducted")
     
@@ -148,7 +157,7 @@ for(t in 2:(t.tot/dt)){
                                             age, sociality, residence_type, comm_bracket, 
                                             residence, nbhd)]
   
-  agents[state %!in% c("Ih", "D") & location == nbhd, 
+  agents[state %!in% c("Ih", "D") & location == nbhd & !is.na(location), 
          location:=comm_loc(location, nbhd_mat_list)]
   
   # Smaller sub-locations (offices and classrooms) for agents in workplaces or schools
@@ -175,15 +184,18 @@ for(t in 2:(t.tot/dt)){
     agents[infect == 1, nextstate:=LEMMAABM::next_state(state, age)]
     agents[infect == 1, tnext:=LEMMAABM::t_til_nxt(state)]
     
+# Save record of new infection events
+    infection_reports[[t-1]] <- agents[infect == 1, .(id,age,race,infect,
+                                                      location,small_location, n_transmitting, n_transmitting_small, FOI,
+                                                      residence,lat,lon,work,school,nbhd,ct,zip,time)]
+    
 # Reset infection & location columns
     agents[, c("location", "small_location",
                "n_transmitting", "n_transmitting_small", 
                "n_present", "n_present_small",
                "FOI", "infect"):=NA_real_]
     
-# Store detailed infection info
-    infection_reports[[t-1]] <- agents[state %!in% c("S", "D", "R"), time:=t]
-    print("New infections generated")
+    #print("New infections generated")
   }
   
   epi_curve[t,] <- LEMMAABM:::sum.inf(agents[,state])
@@ -192,7 +204,8 @@ for(t in 2:(t.tot/dt)){
   fin_out <- list()
   fin_out[["epi_curve"]] <- epi_curve
   fin_out[["linelist_tests"]] <- rbindlist(test_reports,fill = TRUE)
-  fin_out[["all_infections"]] <- rbindlist(infection_reports,fill=TRUE)
+  fin_out[["transitions"]] <- rbindlist(transition_reports,fill=TRUE)
+  fin_out[["infections"]] <- rbindlist(infection_reports,fill=TRUE)
   
   return(fin_out)
   

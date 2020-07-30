@@ -111,7 +111,7 @@ tests_pars <- fitdist(tail(sf_test$tests, 30), "nbinom", "mme")$estimate
 # ---------------------------------------------------------
 # Parallel setup and export to cluster
 # ---------------------------------------------------------
-n_sims_per_par <- 10
+n_sims_per_par <- 1
 bta_E0_grid <- expand.grid(bta = c(0.01,0.025,0.05,0.1),
                            E0 = c(1,3,5))  
 
@@ -119,27 +119,18 @@ bta_E0_sweeps <- bta_E0_grid %>% slice(rep(1:n(), each = n_sims_per_par))
 
 #Setup for running jobs across parallel nodes in cluster
 start.time <- Sys.time()
-n_cores <- detectCores()
 
-cl <- makeCluster(n_cores)
-clusterExport(cl, c("agents", "nbhd_mat_list", "bta_E0_grid", "N",
-                    "pcr_sens_fun", "test_fx", "t.scl", "t.sip", 
-                    "day_of_week_expand", "time_of_day", "t.tot", "dt",
-                    "t.sip", "t.scl"))
-invisible(clusterEvalQ(cl, lapply(c("LEMMAABM", "data.table", "wrswoR", "dqrng", "matrixStats"), 
-                        library, character.only = T)))
-             
-setDTthreads(1)
+#sim_results <- LEMMAABM::covid_abm(bta = bta_E0_grid[1,1], E0 = bta_E0_grid[2,2],Ip0 = 0, Ia0 = 0, Im0 = 0, Imh0 = 0, Ih0 = 0, R0 = 0, D0 = 0,agents, nbhd_mat_list,t.tot, dt, day_of_week_fx = day_of_week_expand,time_of_day_fx = time_of_day, SiP_fx = t.sip, scl_fx = t.scl, test_fx)
 
-sim_results <- parApply(cl, bta_E0_grid, 1, 
-                        FUN = function(x) LEMMAABM::covid_abm(bta = x[1], E0 = x[2], 
-                                                              Ip0 = 0, Ia0 = 0, Im0 = 0, Imh0 = 0, Ih0 = 0, R0 = 0, D0 = 0,
-                                                              agents, nbhd_mat_list,
-                                                              t.tot, dt, day_of_week_fx = day_of_week_expand, 
-                                                              time_of_day_fx = time_of_day, SiP_fx = t.sip, scl_fx = t.scl,
-                                                              test_fx))
+sim_results <- apply(bta_E0_grid, 1, 
+                     FUN = function(x) LEMMAABM::covid_abm(bta = x[1], E0 = x[2], 
+                                                           Ip0 = 0, Ia0 = 0, Im0 = 0, Imh0 = 0, Ih0 = 0, R0 = 0, D0 = 0,
+                                                           agents, nbhd_mat_list,
+                                                           t.tot, dt, day_of_week_fx = day_of_week_expand, 
+                                                           time_of_day_fx = time_of_day, SiP_fx = t.sip, scl_fx = t.scl,
+                                                           test_fx))
 
-stopCluster(cl)  
+
 end.time <- Sys.time()
 
 end.time-start.time
