@@ -109,15 +109,33 @@ tests_pars <- fitdist(tail(sf_test$tests, 30), "nbinom", "mme")$estimate
   nrow(agents[work >0 & essential == 1])/nrow(agents[work>0])  
   
 # ---------------------------------------------------------
-# Parallel setup and export to cluster
+# Non-parallel run with lapply
 # ---------------------------------------------------------
-n_sims <- 100
+
+n_sims <- 12
+  
+start.time <- Sys.time()  
+  sim_results <- lapply(1:n_sims, 
+                        FUN = function(x) LEMMAABM::covid_abm(bta = 0.1, E0 = 3, 
+                                                              Ip0 = 0, Ia0 = 0, Im0 = 0, Imh0 = 0, Ih0 = 0, R0 = 0, D0 = 0,
+                                                              agents, nbhd_mat_list,
+                                                              t.tot, dt, day_of_week_fx = day_of_week_expand, 
+                                                              time_of_day_fx = time_of_day, SiP_fx = t.sip, scl_fx = t.scl,
+                                                              test_fx))
+end.time <- Sys.time()  
+
+nrm_time <- end.time - start.time
+
+print(nrm_time)
+
+# ---------------------------------------------------------
+# Parallel run with setDTthreads(1)
+# ---------------------------------------------------------
 
 #Setup for running jobs across parallel nodes in cluster
-start.time <- Sys.time()
 n_cores <- detectCores()
 
-n_cores
+prl.start.time <- Sys.time()
 
 cl <- makeCluster(n_cores)
 clusterExport(cl, c("agents", "nbhd_mat_list", "n_sims", "N",
@@ -127,7 +145,9 @@ clusterExport(cl, c("agents", "nbhd_mat_list", "n_sims", "N",
 invisible(clusterEvalQ(cl, lapply(c("LEMMAABM", "data.table", "wrswoR", "dqrng", "matrixStats"), 
                         library, character.only = T)))
              
-sim_results <- parLapplyLB(cl, 1:n_sims, 
+setDTthreads(1)
+
+prl_sim_results <- parLapplyLB(cl, 1:n_sims, 
                            fun = function(x) LEMMAABM::covid_abm(bta = 0.1, E0 = 3, 
                                                                  Ip0 = 0, Ia0 = 0, Im0 = 0, Imh0 = 0, Ih0 = 0, R0 = 0, D0 = 0,
                                                                  agents, nbhd_mat_list,
@@ -136,7 +156,42 @@ sim_results <- parLapplyLB(cl, 1:n_sims,
                                                                  test_fx))
 
 stopCluster(cl)  
-end.time <- Sys.time()
+prl.end.time <- Sys.time()
 
-end.time-start.time
-saveRDS(sim_results, paste0("CMH/ABM/Analysis/Outputs/bta_01_e0_3_n100",Sys.Date(),".rds"))
+prl_time <- prl.end.time-prl.start.time
+
+print(prl_time)
+
+# ---------------------------------------------------------
+# Parallel run with default data table functionality
+# ---------------------------------------------------------
+
+#Setup for running jobs across parallel nodes in cluster
+prl.start.time2 <- Sys.time()
+
+cl2 <- makeCluster(n_cores)
+clusterExport(cl2, c("agents", "nbhd_mat_list", "n_sims", "N",
+                    "pcr_sens_fun", "test_fx", "t.scl", "t.sip", 
+                    "day_of_week_expand", "time_of_day", "t.tot", "dt",
+                    "t.sip", "t.scl"))
+invisible(clusterEvalQ(cl2, lapply(c("LEMMAABM", "data.table", "wrswoR", "dqrng", "matrixStats"), 
+                        library, character.only = T)))
+             
+#getDTthreads(1)
+
+prl_sim_results <- parLapplyLB(cl2, 1:n_sims, 
+                           fun = function(x) LEMMAABM::covid_abm(bta = 0.1, E0 = 3, 
+                                                                 Ip0 = 0, Ia0 = 0, Im0 = 0, Imh0 = 0, Ih0 = 0, R0 = 0, D0 = 0,
+                                                                 agents, nbhd_mat_list,
+                                                                 t.tot, dt, day_of_week_fx = day_of_week_expand, 
+                                                                 time_of_day_fx = time_of_day, SiP_fx = t.sip, scl_fx = t.scl,
+                                                                 test_fx))
+
+stopCluster(cl2)  
+prl.end.time2 <- Sys.time()
+
+prl_time2 <- prl.end.time2-prl.start.time2
+
+print(nrm_time)
+print(prl_time)
+print(prl_time2)
