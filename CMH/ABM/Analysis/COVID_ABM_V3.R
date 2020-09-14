@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-#   COVID ABM v2
+#   COVID ABM v3 incorporating SafeGraph data and refined testing and isolation
 #   Chris Hoover (choover@berkeley.edu)
 #   July 2020
 # ---------------------------------------------------------
@@ -17,7 +17,7 @@ rm(list=ls());gc()
 # Adaptively set root directory to LEMMA
 setwd(gsub("LEMMA.*", "LEMMA", normalizePath(getwd())))
 
-devtools::load_all("CMH/ABM/")
+devtools::load_all("CMH/ABM")
 
 # ---------------------------------------------------------
 # Load data
@@ -44,6 +44,11 @@ agents <- readRDS("CMH/ABM/data/sf_synthetic_agents_cbg_dt.rds")
 # Replace NAs with 0  
   agents[is.na(income), c("income", "income_bracket", "comm_bracket"):=0]
   
+# Add compliance and sociality metrics
+  agents[, mask := rbeta(nrow(agents), 5, 2)] # Probability of wearing a mask
+  agents[, q_prob := rbeta(nrow(agents), 5, 2)] # Probability of quarantine/isolation given positive test
+  agents[, sociality := rbeta(nrow(agents), 2, 2)] # Sociality metric
+
   setkey(agents, residence)
 
 #Plot tests through time
@@ -54,51 +59,33 @@ agents <- readRDS("CMH/ABM/data/sf_synthetic_agents_cbg_dt.rds")
   
 N <- nrow(agents)  
 
-#San Francisco neighborhoods matrix list
- nbhd_mat_list <- readRDS("CMH/ABM/data/sf_nbhd_mat_list.rds")
+#San Francisco cbg mvmt list derived from sfgrph data
+  sf_cbg_cdf <- readRDS("CMH/ABM/data/safegraph_cbg_mvmt_cdf_processed_2020-09-11.rds")
+  sf_cbg_indices <- readRDS("CMH/ABM/data/safegraph_cbg_mvmt_ind_processed_2020-09-11.rds")
+  sf_cbg_ids <- read_csv("CMH/Safegraph/Census_2010_CBGs_SF.csv") %>% pull(GEOID10)
 
-# PCR sensitivity data
-pcr_sens <- readRDS("CMH/ABM/data/PCR_Sens_Kucirka.rds")
-  pcr_sens_day <- colMedians(pcr_sens)
-
-  # Function to return estimate of probability + given +  
-  pcr_sens_p1 <- approxfun(c(0:3), c(0, pcr_sens_day[1:3]))
-  pcr_sens_p2<- splinefun(c(0:21), c(0, pcr_sens_day))
-  pcr_sens_fun <- approxfun(seq(0,21,by=0.1), 
-                            c(sapply(seq(0,3.0,by=0.1), pcr_sens_p1),
-                              sapply(seq(3.1,21,by=0.1), pcr_sens_p2)))
+#San francisco stay at home by percent by cbg derived from safegraph
+  sf_sfgrph_pct_home <- readRDS("CMH/ABM/data/sfgrph_devices_pct_home_cbgs_2020-01-01_2020-08-22.rds")
+  last_sfgrph <- max(sf_sfgrph_pct_home$Date)
   
-  #plot(c(0:21),c(0,pcr_sens_day)) ; lines(seq(0,21,by=0.1), sapply(seq(0,21,by=0.1),pcr_sens_fun))
+#Need the simulation to run beyond when we have safegraph movement data to inform movement, so repeat older safegraph data to project in the future 
+  wday(last_sfgrph)
+  startover <- min(sf_sfgrph_pct_home %>% filter(wday(Date) == 1 & month(Date) == 5) %>% pull(Date))
   
-# Contact matrices from https://doi.org/10.1371/journal.pcbi.1005697
-# Will be useful if moving to daily time step  
-home_contacts <- readxl::read_xlsx("CMH/ABM/data/contact_matrices_152_countries/MUestimates_home_1.xlsx")
-  home_c_rate <- colSums(home_contacts)
-
-work_contacts <- readxl::read_xlsx("CMH/ABM/data/contact_matrices_152_countries/MUestimates_work_1.xlsx")
-  work_c_rate <- colSums(work_contacts)
-
-school_contacts <- readxl::read_xlsx("CMH/ABM/data/contact_matrices_152_countries/MUestimates_school_1.xlsx")
-  scl_c_rate <- colSums(school_contacts)
+  sf_sfgrph_pct_home_expand <- rbind(sf_sfgrph_pct_home,
+                                     sf_sfgrph_pct_home %>% filter(Date >= startover))
   
-other_contacts <- readxl::read_xlsx("CMH/ABM/data/contact_matrices_152_countries/MUestimates_other_locations_1.xlsx")
-  other_c_rate <- colSums(other_contacts)
-  
-all_contacts <- readxl::read_xlsx("CMH/ABM/data/contact_matrices_152_countries/MUestimates_all_locations_1.xlsx")
-  all_c_rate <- colSums(all_contacts)
-
 # ---------------------------------------------------------
 # Pre-process data and sim setup
 # ---------------------------------------------------------
 # Time frame and step
 t0 <- as.Date("2020-02-01")
-last_dat <- max(sf_all %>% na.omit() %>% pull(Date))
 today <- Sys.Date()
 
 # Key change dates
 scl.close <- as.Date("2020-03-05")     #Schools closed
-sip.start <- as.Date("2020-03-15")     #SiP announced
-t.end <- as.Date("2020-11-01")   # Where we're headed (for future use)
+mask.start <- as.Date("2020-04-17")              #Mask mandate initiated
+t.end <- as.Date("2020-11-01")   # Simulation end date, corresponds with 
 
 t.tot <- as.numeric(t.end - t0)
 dt = 4/24
@@ -116,12 +103,12 @@ day_of_week_expand[day_of_week_expand == 7] <- "S"
 # Break up week into 6 parts, Morning, Dayx2, Evening, Nightx2: SHOULD UPDATE IF timestep!=4/24
 time_of_day <- rep(c("M", "D", "D", "E", "N", "N"), times = t.tot)  
 
-# Binary time series for sip and school closure active
-t.sip <- c(rep(0, as.numeric(sip.start-t0)/dt),
-           rep(1, as.numeric(t.end-sip.start)/dt))
-
+# Binary time series for school closure active
 t.scl <- c(rep(0, as.numeric(scl.close-t0)/dt),
            rep(1, as.numeric(t.end-scl.close)/dt))
+
+# Expand safegraph-based shelter in place
+sf_sfgrph_sip <- splitstackshape::expandRows(sf_sfgrph_pct_home, count = 1/dt, count.is.col = FALSE)
 
 bta = 0.02 # transmission probability per contact from https://www.medrxiv.org/content/10.1101/2020.05.10.20097469v1.full.pdf+html ; https://doi.org/10.1073/pnas.2008373117
 
@@ -190,6 +177,7 @@ run.start <- Sys.time()
 for(t in 2:(t.tot/dt)){
  print(t)
 # Time step characteristics
+  date_now <- t0+t*dt
   day_week <- day_of_week_expand[t]
   time_day <- time_of_day[t]
   sip.active <- t.sip[t]
@@ -238,7 +226,7 @@ for(t in 2:(t.tot/dt)){
            location:=LEMMAABM::sac_location( 
              state, tested, scl.closed, sip.active,
              time_day, day_week, comm_bracket, age, sociality,
-             residence, school, nbhd)]
+             residence, school, cbg)]
   
   # Agents that are workers only
   agents[school < 0 & work > 0 & state %!in% c("Ih", "D"), 
@@ -246,16 +234,16 @@ for(t in 2:(t.tot/dt)){
                                              sip.active, time_day, day_week,
                                              age, res_kids, essential, sociality,
                                              comm_bracket, income_bracket, 
-                                             residence, work, nbhd)]
+                                             residence, work, cbg)]
   
   # Agents that are neither in school or are working
   agents[work < 0 & school < 0 & state %!in% c("Ih", "D"),
          location:=LEMMAABM::other_location(state, tested,
                                             sip.active, time_day, 
                                             age, sociality, residence_type, comm_bracket, 
-                                            residence, nbhd)]
+                                            residence, cbg)]
   
-  agents[state %!in% c("Ih", "D") & location == nbhd, 
+  agents[state %!in% c("Ih", "D") & location == cbg, 
          location:=comm_loc(location, nbhd_mat_list)]
   
   # Smaller sub-locations (offices and classrooms) for agents in workplaces or schools
@@ -282,8 +270,6 @@ for(t in 2:(t.tot/dt)){
     agents[infect == 1, nextstate:=LEMMAABM::next_state(state, age)]
     agents[infect == 1, tnext:=LEMMAABM::t_til_nxt(state)]
     
-    infection_reports[[t-1]] <- agents[infect == 1,]
-
 # Reset infection & location columns
     agents[, c("location", "small_location",
                "n_transmitting", "n_transmitting_small", 
@@ -291,6 +277,7 @@ for(t in 2:(t.tot/dt)){
                "FOI", "infect"):=NA_real_]
     
 # Store detailed infection info
+    infection_reports[[t-1]] <- agents[state %!in% c("S", "D", "R")]
     print("New infections generated")
   }
   

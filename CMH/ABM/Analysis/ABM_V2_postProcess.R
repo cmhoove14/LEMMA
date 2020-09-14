@@ -2,10 +2,107 @@ library(data.table)
 library(tidyverse)
 library(ggplot2)
 
-bta_e0_cal <- readRDS("CMH/ABM/Analysis/Outputs/bta_e0_calibration2020-07-31.rds")
+# Get SF data
+if(sum(grepl(Sys.Date(), list.files("CMH/Data"))) == 0){
+  source("CMH/Data/Get_COVID_Cal_latest.R")
+  save.image(file = paste("CMH/Data/CA_SF_data", Sys.Date(), ".Rdata"))
+} else {
+  load(paste("CMH/Data/CA_SF_data", Sys.Date(), ".Rdata"))
+}
+
+bta_e0_cal <- readRDS("CMH/ABM/Analysis/Outputs/bta_01_e0_3_n1002020-08-03.rds")
 states <- c("S", "E", "Ip", "Ia", "Im", "Imh", "Ih", "D", "R")
 dt <- 4/24
 start.date <- as.Date("2020-02-01")
+
+abm_cases <- bind_rows(lapply(1:length(bta_e0_cal), function(i){
+  df <- as.data.frame(bta_e0_cal[[i]][["infections"]]) %>% 
+    mutate(time_day = time*dt,
+           date = start.date+time_day,
+           iter = i)
+  
+  return(df)
+
+}))
+
+abm_cases_day <- abm_cases %>% 
+  mutate(date_char = as.character(date)) %>% 
+  group_by(iter, date_char) %>% 
+  summarise(I = n()) %>% 
+  mutate(date = as.Date(date_char))
+
+ggplot() +
+  geom_col(data = sf_case, 
+           aes(x = Date, y = Cases),
+           col = "darkblue", fill = "blue", alpha = 0.7) +
+  geom_line(data = abm_cases_day,
+            aes(x = date, y = I, group = factor(iter)),
+            col = "grey20", alpha = 0.3) +
+  theme_bw() +
+  theme(legend.position = "none") +
+#  ylim(c(0,200)) +
+  labs(title = "Infection curves for 100 ABM runs")
+
+ggplot() +
+  geom_col(data = sf_case, 
+           aes(x = Date, y = Cases),
+           col = "darkblue", fill = "blue", alpha = 0.7) +
+  geom_line(data = abm_cases_day,
+            aes(x = date, y = I, group = factor(iter)),
+            col = "grey20", alpha = 0.3) +
+  theme_bw() +
+  theme(legend.position = "none") +
+  ylim(c(0,200)) +
+  labs(title = "Infection curves for 100 ABM runs")
+
+epi_curves <- bind_rows(lapply(1:length(bta_e0_cal), function(i){
+  df <- as.data.frame(bta_e0_cal[[i]][["epi_curve"]])
+  
+  colnames(df) <- states
+  
+  df.out <- df %>% 
+    mutate(I = Ip+Ia+Im+Imh+Ih,
+           time = row_number(),
+           time_day = time*dt,
+           date = start.date+time_day,
+           iter = i)
+  
+  return(df.out)
+}))
+
+epi_curve_hosp <- epi_curves %>% 
+  mutate(date_char = as.character(date)) %>% 
+  group_by(iter, date_char) %>% 
+  summarise(H = mean(Ih)) %>% 
+  mutate(date = as.Date(date_char))
+
+ggplot() +
+  geom_col(data = sf_hosp, 
+           aes(x = Date, y = HOSP_tot),
+           col = "grey20", fill = "grey50", alpha = 0.7) +
+  geom_line(data = epi_curve_hosp,
+            aes(x = date, y = H, group = factor(iter)),
+            col = "darkblue", alpha = 0.3) +
+  theme_bw() +
+  theme(legend.position = "none") +
+  labs(title = "Hospitalization curves for 100 ABM runs")
+
+
+epi_curves_day <- epi_curves %>% 
+  mutate(date_char = as.character(date)) %>% 
+  group_by(iter, date_char) %>% 
+  summarise(across(all_of(c(states, "I")), mean)) %>% 
+  mutate(date = as.Date(date_char))
+
+  ggplot() +
+    geom_line(data = epi_curves_day, 
+              aes(x = date, y = I, group = factor(iter)),
+              col = "grey20", alpha = 0.3) +
+    geom_line(data = sf_case,
+              aes(x = Date, y = Cases))
+    theme_bw() +
+    theme(legend.position = "none") +
+    labs(title = "Infection curves for 100 ABM runs")
 
 # Should reflect matrix of parameter sweeps 
 n_sims_per_par <- 1

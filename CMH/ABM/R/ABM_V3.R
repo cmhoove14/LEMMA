@@ -1,125 +1,37 @@
-#' @title Sample location
-#'  
-#' @description Function to determine agent's location given present model conditions. Works for agents with 3 possible locations residence/home, community and either work or school. Function passes location ids plus probability of home and community, with probability work/ school then implied
+#------------------
+# Helpers/Utils
+#------------------
+#' @title Summarize Infection
 #' 
-#' @param l_res residence location id
-#' @param l_com community location id
-#' @param l_scl work/school location id
-#' @param p_res probability of being at residence
-#' @param p_com probability of being in community
+#' @description Function to summarize infection vector with individual states into aggregate
 #' 
-#' @return vector of location ids
+#' @param x infections status vector from `ABM` run
+#' 
+#' @return vector of length 9 with integer counts of number of agents in each class
 #' @export
-#' 
-scl_wrk_loc <- function(l_res, l_com, l_scl_wrk, p_res, p_com){
-  n <- length(l_res)
-  #print(n)
-  u <- dqrunif(n)
-  samp <- l_com
-  index <- u < p_res
-  samp[index] <- l_res[index]
-  index <- u > (p_res + p_com)
-  samp[index] <- l_scl_wrk[index]
-  return(samp)
+
+sum.inf <- function(x){
   
+    S = sum(x == "S")
+    E = sum(x == "E")
+    Ip = sum(x == "Ip")
+    Ia = sum(x == "Ia")
+    Im = sum(x == "Im")
+    Imh = sum(x == "Imh")
+    Ih = sum(x == "Ih")
+    D = sum(x == "D")
+    R = sum(x == "R")
+
+  return(c(S, E, Ip, Ia, Im, Imh, Ih, D, R))
 }
 
+#-------------------------
+# Infection functions
+#-------------------------
 
-#' @title Community location utility function
-#'  
-#' @description Draws random uniform variable between 0 and 1, looks in CDF matrix to determine corresponding probability of visiting CBG, finds corresponding CBG visited in index matrix
-#' 
-#' @param mat_cdf cumulative probability matrix with rows corresponding to CDF of individual residing in row and visiting column
-#' @param mat_index index of cbg to which individual residing in row might move to
-#' 
-#' @return 
-#' @export
-#' 
-
-GetNbhd <- function(mat_cdf, mat_index) {
-  n <- nrow(mat_cdf)
-  r <- dqrng::dqrunif(n)
-  index <- max.col(r < mat_cdf, "first")
-  mat_index[cbind(1:n, index)]
-}
-
-#' @title Community location
-#'  
-#' @description Function to randomly determine location if agent is not at work, home, or school. 10% chance of visiting neighboring community, 1% chance of visiting some random community.
-#' 
-#' @param comm community (neighborhood) of residence
-#' @param nbhd_mat_list list of neighbors for all neighborhoods
-#' 
-#' @return location of agent if they choose to be in the community
-#' @export
-#' 
-
-comm_loc <- function(comm, nbhd_mat_list){
-  out <- comm
-  nobs <- length(comm)
-  cp <- dqrunif(nobs)
-
-  # Determine if agent is in own neighborhood, neighboring neighborhood, or randomly chosen neighborhood with probabilities 89%, 10%, 1% respectively
-  in_nbrs <- comm[cp > 0.89 & cp < 0.99]
-  in_rand <- comm[cp > 0.99]
-
-  # For each agent visiting neighboring neighborhood, sample from neighbors
-  out[in_nbrs] <- GetNbhd(nbhd_mat_list$cdf[comm[in_nbrs], ], nbhd_mat_list$index[comm[in_nbrs], ])
-
-  # For each agent visiting random neighborhood, sample randomly
-  out[in_rand] <- comm[sample.int(n = length(in_rand), size = length(in_rand), replace = T)]
-  
-  return(out)
-}
-
-#' @title Simulate school-aged children who are also workers' location
-#'  
-#' @description Simulate location of school-aged children depending on agent characteristics, NPIs, and time of day
-#' 
-#' @param inf.state Infection state, one of S, E, Ip, Ia, Im, Imh, Ih, R
-#' @param tested test status of individual 1/0
-#' @param scl schools closed? 1/0
-#' @param SiP shelter in place active? 1/0
-#' @param time_day time of day (night or day)
-#' @param day_week day of the week (U, M, T, W, R, F, or S)
-#' @param sociality relative sociality of agent
-#' @param comm_bracket income bracket of the community (census tract)
-#' @param res_id id of this individual's residence
-#' @param scl_id id of this individual's school
-#' @param work_id id of this individual's school
-#' @param comm_id id of this individual's community
-#'  
-#' @return location of this individual in the time step with options being the id corresponding to their home (H), school (S), or community (C)
-#' @export
-#'        
-sac_worker_location <- function(inf.state, tested,
-                                scl, SiP, time_day, day_week,
-                                sociality, comm_bracket, 
-                                res_id, scl_id, work_id, comm_id){
-# Children who are sick or tested positive stay home; children always at home at night and in the mornings  
-  if(inf.state %in% c("Im", "Imh") | tested == 1 | time_day %in% c("N", "M")){
-    location = res_id
-  } else if(SiP == 1){
-  # Probability of following SiP function of sociality and income quartile 
-    sip.flw <- as.numeric(dqrunif(1,0,1) > sociality/comm_bracket)
-    location = ifelse(sip.flw == 1, res_id, comm_id)
-# Children workers are in school during the day if it's open and it's a weekday    
-  } else if(scl == 0 & time_day == "D" & day_week %in% c("M", "T", "W", "R", "F")){
-    location = scl_id
-# Children workers are randomly either still at school, in the community, at work or at home in the evenings and mornings during the week if schools are open  
-  } else if(scl == 0 & time_day %in% c("E", "M") & day_week %in% c("M", "T", "W", "R", "F")){
-    location = c(scl_id, comm_id, res_id, work_id)[dqsample.int(4, 1)]
-# Weekend-like dynamics if school is closed, but SiP not in effect or if it's the weekend: children workers can be at home, at work or in the community during the morning, day and evening
-  } else if((scl == 1 & SiP == 0) | (day_week %in% c("S", "U") & SiP == 0)){
-    location = c(comm_id, res_id, work_id)[dqsample.int(3, 1)]
-  } else {
-    location = NA
-  }
-  # TODO: Implement variability in community location with comm_loc function above
-  # if(location == comm_id){location = comm_loc(comm_id)}
-  return(location)
-}
-
+#-------------------------
+# Network/movement functions
+#-------------------------
 #' @title Simulate school-aged children location
 #'  
 #' @description Simulate location of school-aged children depending on agent characteristics, NPIs, and time of day
@@ -382,65 +294,215 @@ location_small <- function(l_id, work_id, school_id, office_id, class_id){
   
 }
 
-#' @title Quarantine symptomatics
+
+#' @title Community location utility function
 #'  
-#' @description Restrict contact of people with symptoms to their household with some compliance probability influenced by whether they're able to work from home
+#' @description Draws random uniform variable between 0 and 1, looks in CDF matrix to determine corresponding probability of visiting CBG, finds corresponding CBG visited in index matrix
 #' 
-#' @param inf.stat Infection status vector
-#' @param base.net Relationship matrix
-#' @param q.prob Vector of length N corresponding to individuals' probability of quarantining given symptoms
+#' @param mat_cdf cumulative probability matrix with rows corresponding to CDF of individual residing in row and visiting column
+#' @param mat_index index of cbg to which individual residing in row might move to
 #' 
-#' @return Updated contact matrix with quarantining of symptomatics implemented  
+#' @return 
 #' @export
-#'        
+#' 
 
-quarantine_symptomatics <- function(inf.stat, base.net, q.prob){
-  out.mat <- base.net
-  
-  #Indices of individuals who are infected with symptoms  
-  infection.indices <- which(inf.stat %in% c("Im", "Imh"))
-  
-  #Bernoulli trial for those with symptoms on whether they'll quarantine
-  q10 <- sapply(q.prob[infection.indices], function(p){ rbinom(1,1,p) })
-  
-  #Indices of individuals who quarantine themselves
-  quarantine.indices <- infection.indices[q10 == 1]
-  
-  #Change home relation status to "Q" for quarantined
-  out.mat[which(out.mat[, quarantine.indices] == "H")] <- "Q"
-  
-  #Eliminate all other relationships
-  out.mat[which(out.mat[, infection.indices] %!in% c("Q", "0"))] <- "0"
-
-  return(out.mat)
+GetNbhd <- function(mat_cdf, mat_index) {
+  n <- nrow(mat_cdf)
+  r <- dqrng::dqrunif(n)
+  index <- max.col(r < mat_cdf, "first")
+  mat_index[cbind(1:n, index)]
 }
 
-#' @title Generate random edges in network
-#'  
-#' @description Function to generate random edges on top of network
-#' 
-#' @param start.net Network matrix to add random edges to
-#' @param r.rate Rate at which individuals add random edges (similar to sociality)
-#' @param n.prob individual probabilities of being involved in random edge generation
-#' @param r.trans.rate Numeric indicating probability a random contact between a susceptible and infectious results in a new infection
-#' 
-#' @return Updated contact matrix with random edges added  
-#' @export
-#'        
+#-------------------------
+# Testing functions
+#-------------------------
 
-add_r_edges <- function(start.net, r.rate, n.prob, r.trans.rate){
-  new.net <- start.net
-  #Number of random edges generated
-    n.r.edges <- rbinom(1, nrow(start.net), r.rate)
-  #Allocate random edges to network with individual probability correspondng to n.prob
-    r.pairs <- matrix(sample(nrow(start.net), 2*n.r.edges, replace = TRUE, prob = n.prob), ncol=2)
-  #If edge already exists in another capacity, keep it  
-    pre.edges <- new.net[r.pairs]
-    post.edges <- ifelse(pre.edges == 0, r.trans.rate, pre.edges)
-    new.net[r.pairs] <- post.edges
 
-  #Make symmetrical  
-    new.net <- sym_mat(new.net)
+#-------------------------
+# Main model sim function
+#-------------------------
+covid_abm_v3 <- function(bta, E0, Ip0, Ia0, Im0, Imh0, Ih0, R0, D0,                  # Starting conditions
+                         agents, nbhd_mat_list,                                      # Agents dt and mvmt matrix
+                         t.tot, dt, day_of_week_fx, time_of_day_fx, SiP_fx, scl_fx,  # Times and key dates
+                         test_fx){
+# Initial conditions
+  e.seed <- E0     #Exposed
+  ip.seed <- Ip0    #infected pre-symptomatic
+  ia.seed <- Ia0    #infected asymptomatic
+  im.seed <- Im0    #infected mildly symptomatic
+  imh.seed <- Imh0   #infected mildly symptomatic, will become severe
+  ih.seed <- Ih0    #infected severely symptomatic
+  d.seed <- D0     #dead
+  r.seed <- R0     #removed
+  non.s <- e.seed + ip.seed + ia.seed + im.seed + imh.seed + ih.seed + d.seed + r.seed
+  s.seed <- N - non.s
   
-  return(new.net)
+# Initial infection allocated among workers
+  init.Es <- sample(agents[work >0, id], e.seed)   
+  init.Ips <- sample(agents[work >0, id], ip.seed)   
+  init.Ias <- sample(agents[work >0, id], ia.seed)   
+  init.Ims <- sample(agents[work >0, id], im.seed)   
+  init.Imhs <- sample(agents[work >0, id], imh.seed)   
+  init.Ihs <- sample(agents[work >0, id], ih.seed)   
+  init.Ds <- sample(agents[work >0, id], d.seed)   
+  init.Rs <- sample(agents[work >0, id], r.seed)   
+
+  agents[id %in% init.Es, state:="E"]
+  agents[id %in% init.Ips, state:="Ip"]
+  agents[id %in% init.Ias, state:="Ia"]
+  agents[id %in% init.Ims, state:="Im"]
+  agents[id %in% init.Imhs, state:="Imh"]
+  agents[id %in% init.Ihs, state:="Ih"]
+  agents[id %in% init.Ds, state:="D"]
+  agents[id %in% init.Rs, state:="R"]
+  
+# Keep track of everyone's infection status through time   
+  epi_curve <- matrix(NA, nrow = t.tot/dt, ncol = 9)
+    epi_curve[1,] <- LEMMAABM:::sum.inf(agents[,state])
+  
+# Keep track of test data through time
+  test_reports <- list()
+
+# Keep track of state transitions through time
+  transition_reports <- list()
+  
+# Keep record of infection events
+  infection_reports <- list()
+   
+# Update characteristics of initial infections  
+  # Transition time
+  agents[state %!in% c("S", "D", "R"), tnext:=LEMMAABM::t_til_nxt(state)]
+  # State entering once transition time expires
+  agents[state %!in% c("S", "D", "R"), nextstate:=LEMMAABM::next_state(state, age)]
+  #Time initial infections occurred
+  agents[state %!in% c("S", "D", "R"), t_infection:=dt]
+  agents[, t_since_test:=0]
+
+# Run simulation    
+for(t in 2:(t.tot/dt)){
+# print(t)
+# Time step characteristics
+  day_week <- day_of_week_fx[t]
+  time_day <- time_of_day_fx[t]
+  sip.active <- SiP_fx[t]
+  scl.closed <- scl_fx[t]
+  
+# Advance transition times, time since infection, time since tested last
+  agents[, time:=t]
+  agents[state %!in% c("S", "D", "R"), tnext:=tnext-dt]
+  agents[state %!in% c("S", "D", "R"), t_infection:=t_infection+dt]
+  agents[, t_since_test:=t_since_test+dt]
+  
+# Save record of state transitions
+  transition_reports[[t-1]] <- agents[tnext < 0 & state %!in% c("S", "D", "R"), .(id,age,race,state,nextstate,tested,test_public,test_private,
+                                                                                  residence,lat,lon,work,school,nbhd,ct,zip,time)]
+
+  
+# Advance expired states to next state, determine new nextstate and time til next state
+  agents[tnext < 0, state:=nextstate]
+  agents[tnext < 0 & state %!in% c("S", "D", "R"), nextstate:=LEMMAABM::next_state(state, age)]
+  agents[tnext < 0 & state %!in% c("S", "D", "R"), tnext:=LEMMAABM::t_til_nxt(state)]
+
+# print("Infections advanced")
+# Implement testing (only during day time)---------------
+  if(time_day != "N"){
+  # Number of tests available corrected for division of day into six parts corrected for testing only occurring in day time 
+    n_tests <- round(test_fx(t*dt)*3/2) 
+  # New testing probabilities
+    if(n_tests > 0){
+      agents[,res_inf:=sum(state %in% c("Im", "Imh")), by = residence]
+      agents[tested == 0 & state!= "D", test_prob:=LEMMAABM::test_prob(state, age, residence_type, res_inf)]
+  # Tested agents
+      testeds <- agents[,id][wrswoR::sample_int_crank(nrow(agents[tested == 0 & state != "D"]),
+                                                      n_tests,
+                                                      agents[tested == 0 & state != "D", test_prob])]
+  # Test results and reset time since last test for those who were tested
+    agents[id %in% testeds, tested:=LEMMAABM::test_sens(state, t_infection)]
+    agents[id %in% testeds, t_since_test:=0]
+    test_reports[[(t-1)]] <- agents[id %in% testeds, .(id,age,race,state,nextstate,tested,test_public,test_private,
+                                                       residence,lat,lon,work,school,nbhd,ct,zip,time)]
+    
+# print("Testing conducted")
+    
+    }
+  }
+  
+# Simulate infection --------------------
+  if(nrow(agents[state %!in% c("S", "E", "D", "R")])>0){
+# Determine locations
+# Find locations of those not deceased or in the hospital  
+  # Agents that are in school
+    agents[school > 0 & work < 0 & state %!in% c("Ih", "D"), 
+           location:=LEMMAABM::sac_location( 
+             state, tested, scl.closed, sip.active,
+             time_day, day_week, comm_bracket, age, sociality,
+             residence, school, nbhd)]
+  
+  # Agents that are workers only
+  agents[school < 0 & work > 0 & state %!in% c("Ih", "D"), 
+         location:=LEMMAABM::worker_location(state, tested,
+                                             sip.active, time_day, day_week,
+                                             age, res_kids, essential, sociality,
+                                             comm_bracket, income_bracket, 
+                                             residence, work, nbhd)]
+  
+  # Agents that are neither in school or are working
+  agents[work < 0 & school < 0 & state %!in% c("Ih", "D"),
+         location:=LEMMAABM::other_location(state, tested,
+                                            sip.active, time_day, 
+                                            age, sociality, residence_type, comm_bracket, 
+                                            residence, nbhd)]
+  
+  agents[state %!in% c("Ih", "D") & location == nbhd & !is.na(location), 
+         location:=comm_loc(location, nbhd_mat_list)]
+  
+  # Smaller sub-locations (offices and classrooms) for agents in workplaces or schools
+  agents[state %!in% c("Ih", "D") & !is.na(location),
+         small_location:=LEMMAABM::location_small(location, work, school, office_id, class_id)]
+  
+# print("Locations resolved")
+# Determine number of individuals and transmitting individuals by location  
+  agents[, n_transmitting:=sum(state %in% c("Ip", "Ia", "Im", "Imh")), by = location]
+  agents[n_transmitting > 0, n_present:=.N, by = location]
+  
+  agents[n_transmitting > 0, n_transmitting_small:=sum(state %in% c("Ip", "Ia", "Im", "Imh")), by = small_location]
+  agents[n_transmitting_small > 0, n_present_small:=.N, by = small_location]
+  
+# Determine FOI for susceptible individuals in location where someone is transmitting
+  agents[n_transmitting > 0 & state == "S", FOI:=LEMMAABM::get_foi(n_transmitting, n_present, bta)]
+  
+# For agents sharing small location, overwrite lower FOI with small location FOI 
+  agents[n_transmitting_small > 0 & state == "S", FOI:=LEMMAABM::get_foi(n_transmitting_small, n_present_small, bta)]
+ 
+# Generate infections, update their state, sample for their nextstate and time until reaching it
+    agents[FOI > 0 & state == "S", infect:=LEMMAABM::foi_infect(FOI)]
+    agents[infect == 1, state:="E"]
+    agents[infect == 1, nextstate:=LEMMAABM::next_state(state, age)]
+    agents[infect == 1, tnext:=LEMMAABM::t_til_nxt(state)]
+    
+# Save record of new infection events
+    infection_reports[[t-1]] <- agents[infect == 1, .(id,age,race,infect,
+                                                      location,small_location, n_transmitting, n_transmitting_small, FOI,
+                                                      residence,lat,lon,work,school,nbhd,ct,zip,time)]
+    
+# Reset infection & location columns
+    agents[, c("location", "small_location",
+               "n_transmitting", "n_transmitting_small", 
+               "n_present", "n_present_small",
+               "FOI", "infect"):=NA_real_]
+    
+    #print("New infections generated")
+  }
+  
+  epi_curve[t,] <- LEMMAABM:::sum.inf(agents[,state])
+  # On to the next one  
+}    
+  fin_out <- list()
+  fin_out[["epi_curve"]] <- epi_curve
+  fin_out[["linelist_tests"]] <- rbindlist(test_reports,fill = TRUE)
+  fin_out[["transitions"]] <- rbindlist(transition_reports,fill=TRUE)
+  fin_out[["infections"]] <- rbindlist(infection_reports,fill=TRUE)
+  
+  return(fin_out)
+  
 }

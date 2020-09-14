@@ -2,44 +2,37 @@ library(data.table)
 library(readr)
 library(jsonlite)
 
-sf_test_site_bgs <- readRDS("sf_test_site_bgs.rds")
-
-GetCT <- function(block_group) substr(block_group, start = 1, stop = 11)
-
-ToCounty1 <- function(origin, visits) {
+ToCBG1 <- function(origin, visits) {
   visits_vec <- unlist(jsonlite::fromJSON(visits))
   data.table(origin, visits = names(visits_vec), num_visits = visits_vec)
 }
 
-ToCounty <- function(row, dt) {
-  ToCounty1(dt[row, origin_census_block_group], dt[row, destination_cbgs])
+ToCBG <- function(row, dt) {
+  ToCBG1(dt[row, origin_census_block_group], dt[row, destination_cbgs])
 }
 
-sf_cts <- read_csv("Census_2010_Tracts.csv")
-sf_ct_dt <- as.data.table(expand.grid(origin_cts = sf_cts$GEOID10,
-                                      visit_cts = sf_cts$GEOID10))
+sf_cbgs <- read_csv("Census_2010_CBGs_SF.csv")
+sf_cbg_dt <- as.data.table(expand.grid(origin_cbgs = sf_cbgs$GEOID10,
+                                       visit_cbgs = sf_cbgs$GEOID10))
 
 # Functions returns number of devices in i with home in j on day t
-test_site_visits <- function(csv){
+cbg_visits <- function(csv){
   sfgrph <- data.table(readr::read_csv(csv))
+  sfgrph[, state_cnty_fips:=substr(origin_census_block_group, start = 1, stop = 5)]
 
-  sfgrph_sf_test_bgs <- sfgrph[origin_census_block_group %in% sf_test_site_bgs,]
+  sfgrph_sf <- sfgrph[state_cnty_fips == "06075"]
 
-  dt <- rbindlist(lapply(1:nrow(sfgrph_sf), ToCounty, dt = sfgrph_sf))
-  dt[, origin_ct := GetCT(origin)]
-  dt[, visits_ct := GetCT(visits)]
+  dt <- rbindlist(lapply(1:nrow(sfgrph_sf), ToCBG, dt = sfgrph_sf))
 
-  dt2 <- dt[substr(visits_ct,1,5)=="06075", .(num_visits = sum(num_visits)), by = c("origin_ct", "visits_ct")]
+  dt2 <- merge.data.table(sf_cbg_dt, dt, all.x = TRUE,
+                          by.x = c("origin_cbgs", "visit_cbgs"), 
+                          by.y = c("origin", "visits"))
   
-  dt2 <- merge.data.table(sf_ct_dt, dt2, all.x = TRUE,
-                          by.x = c("origin_cts", "visit_cts"), 
-                          by.y = c("origin_ct", "visits_ct"))
-  
-  dt2 <- data.table::dcast(dt2, formula = "origin_cts ~ visit_cts", value.var = "num_visits")
-  stopifnot(all.equal(dt2$origin_ct, colnames(dt2)[-1])) #first column is "origin_county"
+  dt2 <- data.table::dcast(dt2, formula = "origin_cbgs ~ visit_cbgs", value.var = "num_visits")
+    stopifnot(all.equal(dt2$origin_cbgs, colnames(dt2)[-1])) 
   
   mat <- as.matrix(dt2[, -1])
-  rownames(mat) <- dt2$origin_ct
+  rownames(mat) <- dt2$origin_cbgs
   mat[is.na(mat)] <- 0
   
   return(mat)
@@ -56,7 +49,7 @@ end <- max(dates)
 
 days <- as.integer(end-start)
 
-fill <- array(data = NA, dim = c(197,197,days))
+fill <- array(data = NA, dim = c(nrow(sf_cbgs),nrow(sf_cbgs),days))
 
 for(i in 1:days){
   idate <- dates[i]
@@ -64,7 +57,7 @@ for(i in 1:days){
   ifile <- paste0("2020/", files[grepl(idate, files)])
     
   if(length(ifile) == 1){
-    fill[,,i] <- CountyConnects(ifile)
+    fill[,,i] <- cbg_visits(ifile)
   } else if(length(ifile) == 0){
     print("No file found for ", idate)
   } else{
@@ -73,4 +66,4 @@ for(i in 1:days){
   
 }
 
-saveRDS(fill, paste0("SFCensTractsMvmt", start, "to", end, ".rds"))
+saveRDS(fill, paste0("SFCensBlockGroupsMvmt", start, "to", end, ".rds"))

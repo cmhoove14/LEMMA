@@ -271,6 +271,9 @@ Ramping up new version of the ABM with agents as a `data.table` which vastly spe
 # 7/7/2020  
 Have most functionality of the ABM worked out, just figuring out how to efficiently simulate contact without an explicit contact network. Will implement this in separate steps: 1) determine location of infectious individuals based on their infection status (e.g. asymptomatic vs symptomatic), testing status, time of day, age, school closure, SiP, work status (e.g. essential), and community income bracket; 2) determine number of contacts made in that location; 3) randomly determine who those contacts were based on the individual's location; and 4) simulate infection across those contacts.
 
+# 8/24/2020  
+Lots of updates from ABM V2 which is running fine, but ~20% of simulationsresult in massive outbreaks that burnout when they reach herd immunity. Probably determined by where initial exposed people are: if highly connected, they sark these large outbreaks. Also probably driven by crude implementation of social distancing and school closures, so shifting to V3 in which movement between census block groups will be informed by Safegraph movement data.  
+
 # ABM V2 TODOs  
 * Determine workplace locations, add to agents dt  
 * Incorporate test sites and types (e.g. hospitals, nursing homes, community facilities) and their locations  
