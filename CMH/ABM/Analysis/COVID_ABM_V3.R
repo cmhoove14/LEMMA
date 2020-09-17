@@ -11,13 +11,18 @@ library(dqrng)
 library(fitdistrplus)
 library(matrixStats)
 library(lubridate)
+library(LEMMAABM)
 
 rm(list=ls());gc()
 
 # Adaptively set root directory to LEMMA
 setwd(gsub("LEMMA.*", "LEMMA", normalizePath(getwd())))
 
-devtools::load_all("CMH/ABM")
+# devtools::load_all("CMH/ABM")
+source("CMH/ABM/R/ABM_Helpers.R")
+source("CMH/ABM/R/ABM_infection_functions.R")
+source("CMH/ABM/R/ABM_network_functions.R")
+source("CMH/ABM/R/ABM_testing_functions.R")
 
 # ---------------------------------------------------------
 # Load data
@@ -72,8 +77,22 @@ N <- nrow(agents)
   wday(last_sfgrph)
   startover <- min(sf_sfgrph_pct_home %>% filter(wday(Date) == 1 & month(Date) == 5) %>% pull(Date))
   
-  sf_sfgrph_pct_home_expand <- rbind(sf_sfgrph_pct_home,
-                                     sf_sfgrph_pct_home %>% filter(Date >= startover))
+  sf_sfgrph_pct_home_expand <- as.data.table(rbind(sf_sfgrph_pct_home,
+                                                   sf_sfgrph_pct_home %>% filter(Date >= startover) %>% mutate(Date = Date + 1 + (last_sfgrph-startover))))
+  
+  data.table::setkey(sf_sfgrph_pct_home_expand, origin_census_block_group)
+  
+  sf_cbg_indices_expand <- abind::abind(sf_cbg_indices[,,1:dim(sf_cbg_indices)[3]], 
+                                        sf_cbg_indices[,,(dim(sf_cbg_indices)[3]-(last_sfgrph-startover)):(dim(sf_cbg_indices)[3])])
+  
+  sf_cbg_cdf_expand <- abind::abind(sf_cbg_cdf[,,1:dim(sf_cbg_cdf)[3]], 
+                                    sf_cbg_cdf[,,(dim(sf_cbg_cdf)[3]-(last_sfgrph-startover)):(dim(sf_cbg_cdf)[3])])
+
+#Get rid of older large objects  
+  rm(sf_sfgrph_pct_home)
+  rm(sf_cbg_cdf)
+  rm(sf_cbg_indices)
+  gc()
   
 # ---------------------------------------------------------
 # Pre-process data and sim setup
@@ -83,9 +102,10 @@ t0 <- as.Date("2020-02-01")
 today <- Sys.Date()
 
 # Key change dates
-scl.close <- as.Date("2020-03-05")     #Schools closed
-mask.start <- as.Date("2020-04-17")              #Mask mandate initiated
-t.end <- as.Date("2020-11-01")   # Simulation end date, corresponds with 
+scl.close <- as.Date("2020-03-05")   # Schools closed
+SiP.start <- as.Date("2020-03-15")   # Shelter in Place started
+mask.start <- as.Date("2020-04-17")  # Mask mandate initiated
+t.end <- as.Date("2020-12-01")       # Simulation end date
 
 t.tot <- as.numeric(t.end - t0)
 dt = 4/24
@@ -103,14 +123,11 @@ day_of_week_expand[day_of_week_expand == 7] <- "S"
 # Break up week into 6 parts, Morning, Dayx2, Evening, Nightx2: SHOULD UPDATE IF timestep!=4/24
 time_of_day <- rep(c("M", "D", "D", "E", "N", "N"), times = t.tot)  
 
-# Binary time series for school closure active
-t.scl <- c(rep(0, as.numeric(scl.close-t0)/dt),
-           rep(1, as.numeric(t.end-scl.close)/dt))
-
-# Expand safegraph-based shelter in place
-sf_sfgrph_sip <- splitstackshape::expandRows(sf_sfgrph_pct_home, count = 1/dt, count.is.col = FALSE)
-
-bta = 0.02 # transmission probability per contact from https://www.medrxiv.org/content/10.1101/2020.05.10.20097469v1.full.pdf+html ; https://doi.org/10.1073/pnas.2008373117
+# Transmission probabilities across different edges https://www.medrxiv.org/content/10.1101/2020.05.10.20097469v1.full.pdf
+  trans.hh <- 0.1
+  trans.work <- 0.01
+  trans.school <- 0.02
+  trans.other <- 0.002
 
 # Tests conducted
 tests_pars <- fitdist(tail(sf_test$tests, 30), "nbinom", "mme")$estimate
@@ -159,9 +176,9 @@ tests_pars <- fitdist(tail(sf_test$tests, 30), "nbinom", "mme")$estimate
    
 # Update characteristics of initial infections  
   # Transition time
-  agents[state %!in% c("S", "D", "R"), tnext:=LEMMAABM::t_til_nxt(state)]
+  agents[state %!in% c("S", "D", "R"), tnext:=t_til_nxt(state)]
   # State entering once transition time expires
-  agents[state %!in% c("S", "D", "R"), nextstate:=LEMMAABM::next_state(state, age)]
+  agents[state %!in% c("S", "D", "R"), nextstate:=next_state(state, age)]
   #Time initial infections occurred
   agents[state %!in% c("S", "D", "R"), t_infection:=dt]
   agents[, t_since_test:=0]
@@ -176,12 +193,13 @@ tests_pars <- fitdist(tail(sf_test$tests, 30), "nbinom", "mme")$estimate
 run.start <- Sys.time()
 for(t in 2:(t.tot/dt)){
  print(t)
+  
 # Time step characteristics
   date_now <- t0+t*dt
+  agents[, Date:=date_now]
+  date_num <- floor(date_now-as.Date("2020-01-01"))
   day_week <- day_of_week_expand[t]
   time_day <- time_of_day[t]
-  sip.active <- t.sip[t]
-  scl.closed <- t.scl[t]
   
 # Advance transition times, time since infection, time since tested last
   agents[state %!in% c("S", "D", "R"), tnext:=tnext-dt]
@@ -190,8 +208,8 @@ for(t in 2:(t.tot/dt)){
   
 # Advance expired states to next state, determine new nextstate and time til next state
   agents[tnext < 0, state:=nextstate]
-  agents[tnext < 0 & state %!in% c("S", "D", "R"), nextstate:=LEMMAABM::next_state(state, age)]
-  agents[tnext < 0 & state %!in% c("S", "D", "R"), tnext:=LEMMAABM::t_til_nxt(state)]
+  agents[tnext < 0 & state %!in% c("S", "D", "R"), nextstate:=next_state(state, age)]
+  agents[tnext < 0 & state %!in% c("S", "D", "R"), tnext:=t_til_nxt(state)]
 
   print("Infections advanced")
 # Implement testing (only during day time)---------------
@@ -218,30 +236,49 @@ for(t in 2:(t.tot/dt)){
   }
   
 # Simulate infection --------------------
+  
   if(nrow(agents[state %!in% c("S", "E", "D", "R")])>0){
-# Determine locations
+    
+# Determine locations ---------------
+  scl.closed <- ifelse(date_now > scl.close, 1, 0)
+  SiP.active <- ifelse(date_now > SiP.start, 1, 0)
+  
+  sip.today <- sf_sfgrph_pct_home_expand[Date == as.character(date_now),]
+  sip.mean <- mean(sip.today$pct_home)
+  agents <- merge(agents, sip.today, by.x = "cbg", by.y = "origin_census_block_group", all.x = TRUE)
+  agents[is.na(pct_home), pct_home:=sip.mean]
+  agents[, sip.active:=rbinom(N, 1, pct_home)]
+  
+  GetNbhd <- function(mat_cdf, mat_index) {
+  n <- nrow(mat_cdf)
+  r <- dqrng::dqrunif(n)
+  index <- max.col(r < mat_cdf, "first")
+  mat_index[cbind(1:n, index)]
+}
+
+  
 # Find locations of those not deceased or in the hospital  
   # Agents that are in school
-    agents[school > 0 & work < 0 & state %!in% c("Ih", "D"), 
-           location:=LEMMAABM::sac_location( 
-             state, tested, scl.closed, sip.active,
-             time_day, day_week, comm_bracket, age, sociality,
-             residence, school, cbg)]
+  agents[school > 0 & work < 0 & state %!in% c("Ih", "D"), 
+         location:=sac_location( 
+           state, tested, scl.closed, sip.active,
+           time_day, day_week, comm_bracket, age, sociality,
+           residence, school, cbg)]
   
   # Agents that are workers only
   agents[school < 0 & work > 0 & state %!in% c("Ih", "D"), 
-         location:=LEMMAABM::worker_location(state, tested,
-                                             sip.active, time_day, day_week,
-                                             age, res_kids, essential, sociality,
-                                             comm_bracket, income_bracket, 
-                                             residence, work, cbg)]
+         location:=worker_location(state, tested,
+                                   sip.active, time_day, day_week,
+                                   age, res_kids, essential, sociality,
+                                   comm_bracket, income_bracket, 
+                                   residence, work, cbg)]
   
   # Agents that are neither in school or are working
   agents[work < 0 & school < 0 & state %!in% c("Ih", "D"),
-         location:=LEMMAABM::other_location(state, tested,
-                                            sip.active, time_day, 
-                                            age, sociality, residence_type, comm_bracket, 
-                                            residence, cbg)]
+         location:=other_location(state, tested,
+                                  sip.active, time_day, 
+                                  age, sociality, residence_type, comm_bracket, 
+                                  residence, cbg)]
   
   agents[state %!in% c("Ih", "D") & location == cbg, 
          location:=comm_loc(location, nbhd_mat_list)]
